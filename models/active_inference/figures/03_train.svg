@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="280" viewBox="0 0 1600 280">
+<rect width="1600" height="280" fill="#ffffff"/>
+<text x="48.0" y="52.0" font-family="Noto Sans CJK JP" font-size="32" font-weight="bold" fill="#1c1c1c" text-anchor="start">学習の順序</text>
+<rect x="1120.0" y="28.0" width="22.0" height="22.0" rx="4" fill="#e6f0fa" stroke="#1d4f91" stroke-width="2"/>
+<text x="1150.0" y="46.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#1c1c1c" text-anchor="start">世界モデル</text>
+<rect x="1270.0" y="28.0" width="22.0" height="22.0" rx="4" fill="#f8efe6" stroke="#b85c38" stroke-width="2"/>
+<text x="1300.0" y="46.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#1c1c1c" text-anchor="start">行動選択</text>
+<text x="184.0" y="112.0" font-family="Noto Sans CJK JP" font-size="22" font-weight="bold" fill="#1c1c1c" text-anchor="middle">1</text>
+<rect x="48.0" y="130.0" width="272.0" height="96.0" rx="14" fill="#ffffff" stroke="#1c1c1c" stroke-width="2.5"/>
+<text x="184.0" y="164.0" font-family="Noto Sans CJK JP" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">収集</text>
+<text x="184.0" y="190.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">ランダム行動</text>
+<text x="492.0" y="112.0" font-family="Noto Sans CJK JP" font-size="22" font-weight="bold" fill="#1c1c1c" text-anchor="middle">2</text>
+<rect x="356.0" y="130.0" width="272.0" height="96.0" rx="14" fill="#e6f0fa" stroke="#1d4f91" stroke-width="2.5"/>
+<text x="492.0" y="164.0" font-family="Noto Sans CJK JP" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">世界モデル</text>
+<text x="492.0" y="190.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">損失を更新</text>
+<line x1="320.0" y1="178.0" x2="344.0" y2="178.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="356.0,178.0 344.0,183.5 344.0,172.5" fill="#6a6a6a"/>
+<text x="800.0" y="112.0" font-family="Noto Sans CJK JP" font-size="22" font-weight="bold" fill="#1c1c1c" text-anchor="middle">3</text>
+<rect x="664.0" y="130.0" width="272.0" height="96.0" rx="14" fill="#f8efe6" stroke="#b85c38" stroke-width="2.5"/>
+<text x="800.0" y="164.0" font-family="Noto Sans CJK JP" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">候補</text>
+<text x="800.0" y="190.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">結果を保存</text>
+<line x1="628.0" y1="178.0" x2="652.0" y2="178.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="664.0,178.0 652.0,183.5 652.0,172.5" fill="#6a6a6a"/>
+<text x="1108.0" y="112.0" font-family="Noto Sans CJK JP" font-size="22" font-weight="bold" fill="#1c1c1c" text-anchor="middle">4</text>
+<rect x="972.0" y="130.0" width="272.0" height="96.0" rx="14" fill="#f8efe6" stroke="#b85c38" stroke-width="2.5"/>
+<text x="1108.0" y="164.0" font-family="Noto Sans CJK JP" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">方策</text>
+<text x="1108.0" y="190.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">方策だけ更新</text>
+<line x1="936.0" y1="178.0" x2="960.0" y2="178.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="972.0,178.0 960.0,183.5 960.0,172.5" fill="#6a6a6a"/>
+<text x="1416.0" y="112.0" font-family="Noto Sans CJK JP" font-size="22" font-weight="bold" fill="#1c1c1c" text-anchor="middle">5</text>
+<rect x="1280.0" y="130.0" width="272.0" height="96.0" rx="14" fill="#f8efe6" stroke="#b85c38" stroke-width="2.5"/>
+<text x="1416.0" y="164.0" font-family="Noto Sans CJK JP" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">評価</text>
+<text x="1416.0" y="190.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">方策で実行</text>
+<line x1="1244.0" y1="178.0" x2="1268.0" y2="178.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="1280.0,178.0 1268.0,183.5 1268.0,172.5" fill="#6a6a6a"/>
+</svg>

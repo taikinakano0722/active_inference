@@ -1,0 +1,18 @@
+Collecting 30 random episodes...
+  mean return: 2.614
+Training world model for 40 epochs...
+  epoch 001 total=4.0929 recon=2.2391 rew=0.9515 kl=0.9023
+  epoch 010 total=4.0217 recon=2.2554 rew=0.9239 kl=0.8424
+  epoch 020 total=3.9564 recon=2.2061 rew=0.9220 kl=0.8283
+  epoch 030 total=3.9717 recon=2.2061 rew=0.9375 kl=0.8281
+  epoch 040 total=3.9665 recon=2.1955 rew=0.9363 kl=0.8347
+Evaluating candidate planner...
+  candidate mean return: 5.667
+Training policy for 30 epochs...
+  epoch 001 loss=1.1392 efe=-1.0274
+  epoch 010 loss=1.1007 efe=-1.0123
+  epoch 020 loss=1.1407 efe=-1.0077
+  epoch 030 loss=1.0747 efe=-0.9856
+Evaluating policy mode...
+  policy mean return: 7.529
+  random mean return: 2.614

@@ -1,0 +1,41 @@
+# Python 3.11
+# models/dreamerv3 を GPU 上で動かすための依存。
+# JAX の版は models/dreamerv3/requirements.txt の jax[cuda12]==0.4.33 に合わせる。
+# Atari と dm_control は implementation_memo/2.2_implementation.md の第1段・第2段。
+
+# JAX / CUDA 12。nvcc の上限は models/dreamerv3/requirements.txt の指定。
+jax[cuda12]==0.4.33
+nvidia-cuda-nvcc-cu12<=12.2
+numpy==1.26.4
+
+# DreamerV3
+av==17.1.0
+chex==0.1.90
+cloudpickle
+colored_traceback==0.4.2
+einops==0.8.2
+elements>=3.19.1
+google-resumable-media>=2.7.2
+granular==0.23.1
+ipdb
+jaxtyping==0.3.7
+ninjax==3.6.3
+optax==0.2.5
+portal==3.8.1
+pillow
+ruamel.yaml
+scope==0.7.1
+tqdm
+
+# 2.2 第1段: atari_pong
+ale_py==0.9.0
+autorom[accept-rom-license]==0.6.1
+
+# 2.2 第2段: dmc_walker_walk（画面のみ）
+dm_control
+
+# models/active_inference。JAX 0.4.33 に合わせる。
+# equinox 0.11.11 以降は jax>=0.4.38、distrax 0.1.6 以降は jax>=0.7 を要求する。
+equinox==0.11.10
+distrax==0.1.5
+tensorflow-probability==0.24.0

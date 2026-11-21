@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="780" viewBox="0 0 1600 780">
+<rect width="1600" height="780" fill="#ffffff"/>
+<text x="48.0" y="52.0" font-family="Noto Sans CJK JP" font-size="32" font-weight="bold" fill="#1c1c1c" text-anchor="start">実データの更新</text>
+<text x="860.0" y="52.0" font-family="Noto Sans CJK JP" font-size="32" font-weight="bold" fill="#1c1c1c" text-anchor="start">行動の選び方</text>
+<rect x="64.0" y="172.0" width="310.0" height="78.0" rx="14" fill="#ffffff" stroke="#1c1c1c" stroke-width="2.5"/>
+<text x="219.0" y="206.0" font-family="Noto Sans CJK JP" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">観測</text>
+<text x="219.0" y="232.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">ベクトルと画像</text>
+<rect x="64.0" y="286.0" width="310.0" height="78.0" rx="14" fill="#e6f0fa" stroke="#1d4f91" stroke-width="2.5"/>
+<text x="219.0" y="320.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">encoder.py</text>
+<text x="219.0" y="346.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">キーごとに変換</text>
+<rect x="64.0" y="400.0" width="310.0" height="78.0" rx="14" fill="#e6f0fa" stroke="#1d4f91" stroke-width="2.5"/>
+<text x="219.0" y="434.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">rssm.py</text>
+<text x="219.0" y="460.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">事後状態</text>
+<line x1="219.0" y1="250.0" x2="219.0" y2="274.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="219.0,286.0 213.5,274.0 224.5,274.0" fill="#6a6a6a"/>
+<line x1="219.0" y1="364.0" x2="219.0" y2="388.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="219.0,400.0 213.5,388.0 224.5,388.0" fill="#6a6a6a"/>
+<rect x="444.0" y="300.0" width="240.0" height="78.0" rx="14" fill="#e6f0fa" stroke="#1d4f91" stroke-width="2.5"/>
+<text x="564.0" y="334.0" font-family="Noto Sans CJK JP" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">再構成</text>
+<text x="564.0" y="360.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">観測尤度</text>
+<rect x="444.0" y="400.0" width="240.0" height="78.0" rx="14" fill="#e6f0fa" stroke="#1d4f91" stroke-width="2.5"/>
+<text x="564.0" y="434.0" font-family="Noto Sans CJK JP" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">報酬</text>
+<text x="564.0" y="460.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">予測尤度</text>
+<rect x="444.0" y="500.0" width="240.0" height="78.0" rx="14" fill="#e6f0fa" stroke="#1d4f91" stroke-width="2.5"/>
+<text x="564.0" y="534.0" font-family="Noto Sans CJK JP" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">KL</text>
+<text x="564.0" y="560.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">事前と事後</text>
+<line x1="374.0" y1="439.0" x2="402.0" y2="439.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<line x1="402.0" y1="339.0" x2="402.0" y2="539.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<line x1="402.0" y1="339.0" x2="432.0" y2="339.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="444.0,339.0 432.0,344.5 432.0,333.5" fill="#6a6a6a"/>
+<line x1="402.0" y1="439.0" x2="432.0" y2="439.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="444.0,439.0 432.0,444.5 432.0,433.5" fill="#6a6a6a"/>
+<line x1="402.0" y1="539.0" x2="432.0" y2="539.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="444.0,539.0 432.0,544.5 432.0,533.5" fill="#6a6a6a"/>
+<rect x="1060.0" y="96.0" width="280.0" height="78.0" rx="14" fill="#e6f0fa" stroke="#1d4f91" stroke-width="2.5"/>
+<text x="1200.0" y="130.0" font-family="Noto Sans CJK JP" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">事後状態</text>
+<text x="1200.0" y="156.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">deter + stoch</text>
+<rect x="860.0" y="230.0" width="322.0" height="316.0" rx="16" fill="#f3f3f1" stroke="#1c1c1c" stroke-width="2.5"/>
+<rect x="1202.0" y="230.0" width="322.0" height="222.0" rx="16" fill="#f3f3f1" stroke="#1c1c1c" stroke-width="2.5"/>
+<text x="876.0" y="258.0" font-family="Noto Sans CJK JP" font-size="18" font-weight="normal" fill="#1c1c1c" text-anchor="start">候補モード</text>
+<text x="1218.0" y="258.0" font-family="Noto Sans CJK JP" font-size="18" font-weight="normal" fill="#1c1c1c" text-anchor="start">方策モード</text>
+<line x1="1200.0" y1="174.0" x2="1032.5" y2="226.4" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="1021.0,230.0 1030.8,221.2 1034.1,231.7" fill="#6a6a6a"/>
+<line x1="1200.0" y1="174.0" x2="1351.7" y2="226.1" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="1363.0,230.0 1349.9,231.3 1353.4,220.9" fill="#6a6a6a"/>
+<rect x="876.0" y="274.0" width="290.0" height="72.0" rx="14" fill="#f8efe6" stroke="#b85c38" stroke-width="2.5"/>
+<text x="1021.0" y="308.0" font-family="Noto Sans CJK JP" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">行動列</text>
+<text x="1021.0" y="334.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">horizon 長</text>
+<rect x="876.0" y="368.0" width="290.0" height="72.0" rx="14" fill="#f8efe6" stroke="#b85c38" stroke-width="2.5"/>
+<text x="1021.0" y="402.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">efe.py</text>
+<text x="1021.0" y="428.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">実用と情報</text>
+<rect x="876.0" y="462.0" width="290.0" height="72.0" rx="14" fill="#f8efe6" stroke="#b85c38" stroke-width="2.5"/>
+<text x="1021.0" y="496.0" font-family="Noto Sans CJK JP" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">先頭の1手</text>
+<text x="1021.0" y="522.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">和が最小</text>
+<rect x="1218.0" y="274.0" width="290.0" height="72.0" rx="14" fill="#f8efe6" stroke="#b85c38" stroke-width="2.5"/>
+<text x="1363.0" y="308.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">PolicyNet</text>
+<text x="1363.0" y="334.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">想像で学習</text>
+<rect x="1218.0" y="368.0" width="290.0" height="72.0" rx="14" fill="#f8efe6" stroke="#b85c38" stroke-width="2.5"/>
+<text x="1363.0" y="402.0" font-family="Noto Sans CJK JP" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">1サンプル</text>
+<text x="1363.0" y="428.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">分布から引く</text>
+<line x1="1021.0" y1="346.0" x2="1021.0" y2="356.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="1021.0,368.0 1015.5,356.0 1026.5,356.0" fill="#6a6a6a"/>
+<line x1="1021.0" y1="440.0" x2="1021.0" y2="450.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="1021.0,462.0 1015.5,450.0 1026.5,450.0" fill="#6a6a6a"/>
+<line x1="1363.0" y1="346.0" x2="1363.0" y2="356.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="1363.0,368.0 1357.5,356.0 1368.5,356.0" fill="#6a6a6a"/>
+<rect x="860.0" y="574.0" width="672.0" height="78.0" rx="14" fill="#ffffff" stroke="#1c1c1c" stroke-width="2.5"/>
+<text x="1196.0" y="608.0" font-family="Noto Sans CJK JP" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">行動</text>
+<text x="1196.0" y="634.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">環境へ1手</text>
+<line x1="1021.0" y1="534.0" x2="1021.0" y2="562.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="1021.0,574.0 1015.5,562.0 1026.5,562.0" fill="#6a6a6a"/>
+<line x1="1363.0" y1="440.0" x2="1363.0" y2="562.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="1363.0,574.0 1357.5,562.0 1368.5,562.0" fill="#6a6a6a"/>
+</svg>

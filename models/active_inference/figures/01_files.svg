@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="860" viewBox="0 0 1600 860">
+<rect width="1600" height="860" fill="#ffffff"/>
+<text x="48.0" y="52.0" font-family="Noto Sans CJK JP" font-size="32" font-weight="bold" fill="#1c1c1c" text-anchor="start">ファイルの役割</text>
+<rect x="1120.0" y="28.0" width="22.0" height="22.0" rx="4" fill="#e6f0fa" stroke="#1d4f91" stroke-width="2"/>
+<text x="1150.0" y="46.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#1c1c1c" text-anchor="start">世界モデル</text>
+<rect x="1270.0" y="28.0" width="22.0" height="22.0" rx="4" fill="#f8efe6" stroke="#b85c38" stroke-width="2"/>
+<text x="1300.0" y="46.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#1c1c1c" text-anchor="start">行動選択</text>
+<rect x="436.0" y="96.0" width="340.0" height="84.0" rx="14" fill="#ffffff" stroke="#1c1c1c" stroke-width="2.5"/>
+<text x="606.0" y="130.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">spaces.py</text>
+<text x="606.0" y="156.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">空間の正本</text>
+<rect x="824.0" y="96.0" width="340.0" height="84.0" rx="14" fill="#ffffff" stroke="#1c1c1c" stroke-width="2.5"/>
+<text x="994.0" y="130.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">config.py</text>
+<text x="994.0" y="156.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">数値とモード</text>
+<rect x="40.0" y="250.0" width="1520.0" height="570.0" rx="18" fill="#f3f3f1" stroke="#1c1c1c" stroke-width="2.5"/>
+<text x="64.0" y="286.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="start">train.py</text>
+<line x1="606.0" y1="180.0" x2="606.0" y2="238.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="606.0,250.0 600.5,238.0 611.5,238.0" fill="#6a6a6a"/>
+<line x1="994.0" y1="180.0" x2="994.0" y2="238.0" stroke="#6a6a6a" stroke-width="2.25" stroke-linecap="round"/>
+<polygon points="994.0,250.0 988.5,238.0 999.5,238.0" fill="#6a6a6a"/>
+<rect x="64.0" y="308.0" width="477.3" height="84.0" rx="14" fill="#ffffff" stroke="#1c1c1c" stroke-width="2.5"/>
+<text x="302.7" y="342.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">point1d.py</text>
+<text x="302.7" y="368.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">position と goal</text>
+<rect x="561.3" y="308.0" width="477.3" height="84.0" rx="14" fill="#ffffff" stroke="#1c1c1c" stroke-width="2.5"/>
+<text x="800.0" y="342.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">point1d_image.py</text>
+<text x="800.0" y="368.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">画像キーを追加</text>
+<rect x="1058.7" y="308.0" width="477.3" height="84.0" rx="14" fill="#ffffff" stroke="#1c1c1c" stroke-width="2.5"/>
+<text x="1297.3" y="342.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">replay_buffer.py</text>
+<text x="1297.3" y="368.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">完了エピソード</text>
+<rect x="64.0" y="420.0" width="1472.0" height="376.0" rx="16" fill="#ffffff" stroke="#1c1c1c" stroke-width="2.5"/>
+<text x="84.0" y="452.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="start">agent.py</text>
+<rect x="84.0" y="476.0" width="466.7" height="84.0" rx="14" fill="#e6f0fa" stroke="#1d4f91" stroke-width="2.5"/>
+<text x="317.3" y="510.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">encoder.py</text>
+<text x="317.3" y="536.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">観測をトークンへ</text>
+<rect x="566.7" y="476.0" width="466.7" height="84.0" rx="14" fill="#e6f0fa" stroke="#1d4f91" stroke-width="2.5"/>
+<text x="800.0" y="510.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">rssm.py</text>
+<text x="800.0" y="536.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">deter / stoch</text>
+<rect x="1049.3" y="476.0" width="466.7" height="84.0" rx="14" fill="#e6f0fa" stroke="#1d4f91" stroke-width="2.5"/>
+<text x="1282.7" y="510.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">decoder.py</text>
+<text x="1282.7" y="536.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">観測と報酬</text>
+<rect x="84.0" y="580.0" width="708.0" height="84.0" rx="14" fill="#f8efe6" stroke="#b85c38" stroke-width="2.5"/>
+<text x="438.0" y="614.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">efe.py</text>
+<text x="438.0" y="640.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">実用と情報利得</text>
+<rect x="808.0" y="580.0" width="708.0" height="84.0" rx="14" fill="#f8efe6" stroke="#b85c38" stroke-width="2.5"/>
+<text x="1162.0" y="614.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">policy.py</text>
+<text x="1162.0" y="640.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">方策と候補列</text>
+<rect x="84.0" y="684.0" width="1432.0" height="84.0" rx="14" fill="#ffffff" stroke="#1c1c1c" stroke-width="2.5"/>
+<text x="800.0" y="718.0" font-family="DejaVu Sans Mono" font-size="20" font-weight="normal" fill="#1c1c1c" text-anchor="middle">networks.py</text>
+<text x="800.0" y="744.0" font-family="Noto Sans CJK JP" font-size="16" font-weight="normal" fill="#5c5c5c" text-anchor="middle">MLP・GRU・CNN</text>
+</svg>

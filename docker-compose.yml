@@ -1,0 +1,28 @@
+services:
+  infant_project:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    runtime: nvidia
+    shm_size: 16gb
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    environment:
+      PYTHONPATH: "/workspace/models/dreamerv3:/workspace/models"
+      MUJOCO_GL: "egl"
+      PYTHONUNBUFFERED: "1"
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "all"
+    command: ["sleep", "infinity"]
+    container_name: ${CONTAINER_NAME}
+    ports:
+      - 6910:6006 # tensorboard。6900 は nakano_infant が使用中
+      - 8000:8000 # scope viewer
