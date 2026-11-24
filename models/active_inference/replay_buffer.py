@@ -21,6 +21,10 @@ class ReplayBuffer:
     def n_episodes(self) -> int:
         return len(self._episodes)
 
+    def can_sample(self, n_steps: int) -> bool:
+        """長さ n_steps 以上のチャンクが1本でもあれば真。"""
+        return any(len(ep["rew"]) >= n_steps for ep in self._episodes)
+
     def add_episode(self, episode: dict[str, Any]) -> None:
         """
         episode は次のキーを持つ。

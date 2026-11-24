@@ -99,7 +99,15 @@ class Agent(eqx.Module):
             feat_dim, hidden_dim=config.hidden_dim, layers=2, key=k4
         )
         policy = PolicyNet(
-            feat_dim, act_space, hidden_dim=config.hidden_dim, layers=3, key=k5
+            feat_dim,
+            act_space,
+            hidden_dim=config.hidden_dim,
+            layers=3,
+            min_std=config.policy_min_std,
+            max_std=config.policy_max_std,
+            unimix=config.policy_unimix,
+            outscale=config.policy_outscale,
+            key=k5,
         )
         return cls(
             encoder=encoder,
@@ -272,7 +280,7 @@ def policy_loss(
     損失に入れるのは、この EFE をホライズン分足した値。
 
     ここは常に epistemic_kl=None で EFE を計算する。config.efe_mode は
-    "entropy" である必要がある。train() が方策学習の前にその値を入れている。
+    "entropy" である必要がある。想像中に KL を毎回入れると重いため、kl は候補モード向け。
     """
     B = start_states["deter"].shape[0]
     keys = jax.random.split(key, B)
