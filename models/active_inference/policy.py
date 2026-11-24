@@ -21,7 +21,12 @@ from .spaces import Space, action_dim
 
 
 class PolicyNet(eqx.Module):
-    """潜在特徴 → 行動分布。単一サンプル。"""
+    """潜在特徴 → 行動分布。単一サンプル。
+
+    最終層の重みは outscale 倍する。DreamerV3 と同じく小さく始めると、
+    初期のロジットと平均はほぼ零になり、最初のサンプルは行動範囲に広がる。
+    離散は one-hot なので、softmax のあと unimix だけ一様分布を混ぜる。
+    """
 
     mlp: MLP
     discrete: bool = eqx.field(static=True)
@@ -29,6 +34,8 @@ class PolicyNet(eqx.Module):
     low: float = eqx.field(static=True)
     high: float = eqx.field(static=True)
     min_std: float = eqx.field(static=True)
+    max_std: float = eqx.field(static=True)
+    unimix: float = eqx.field(static=True)
 
     def __init__(
         self,
@@ -36,13 +43,20 @@ class PolicyNet(eqx.Module):
         act_space: dict[str, Space],
         hidden_dim: int = 200,
         layers: int = 3,
-        min_std: float = 1e-4,
+        min_std: float = 0.1,
+        max_std: float = 1.0,
+        unimix: float = 0.01,
+        outscale: float = 0.01,
         key: jax.Array | None = None,
     ):
         if key is None:
             key = jax.random.PRNGKey(0)
         if len(act_space) != 1:
             raise NotImplementedError("最初のモデルは行動キーが1つのみ対応です。")
+        if not 0.0 <= unimix <= 1.0:
+            raise ValueError("unimix は 0 以上 1 以下にしてください。")
+        if min_std <= 0 or max_std < min_std:
+            raise ValueError("標準偏差は 0 < min_std <= max_std にしてください。")
         space = next(iter(act_space.values()))
         self.discrete = bool(space.discrete)
         if self.discrete:
@@ -57,18 +71,37 @@ class PolicyNet(eqx.Module):
             self.low = -1.0 if space.low is None else float(space.low)
             self.high = 1.0 if space.high is None else float(space.high)
         self.min_std = float(min_std)
+        self.max_std = float(max_std)
+        self.unimix = float(unimix)
         self.mlp = MLP(feat_dim, out, hidden_dim, layers, key=key)
+        # 核だけを縮める。バイアスの初期値は零のまま。
+        self.mlp = eqx.tree_at(
+            lambda m: m.layers[-1].weight,
+            self.mlp,
+            self.mlp.layers[-1].weight * float(outscale),
+        )
 
     def __call__(self, feat: jnp.ndarray) -> distrax.Distribution:
         raw = self.mlp(feat)
         if self.discrete:
-            return distrax.OneHotCategorical(logits=raw)
-        mean, raw_std = jnp.split(raw, 2, axis=-1)
+            logits = raw
+            if self.unimix:
+                probs = jax.nn.softmax(logits, axis=-1)
+                uniform = jnp.full_like(probs, 1.0 / probs.shape[-1])
+                probs = (1.0 - self.unimix) * probs + self.unimix * uniform
+                logits = jnp.log(probs)
+            return distrax.OneHotCategorical(logits=logits)
+        mean_raw, std_raw = jnp.split(raw, 2, axis=-1)
         # 平均を行動範囲へ押し込む。
         mid = 0.5 * (self.high + self.low)
         half = 0.5 * (self.high - self.low)
-        mean = mid + half * jnp.tanh(mean)
-        std = jax.nn.softplus(raw_std) + self.min_std
+        mean = mid + half * jnp.tanh(mean_raw)
+        # 標準偏差は正規化空間 [-1, 1] で [min_std, max_std]。
+        # raw が 0 付近のとき sigmoid(2) で上限側になり、最初から広がる。
+        # 行動の実単位へは、範囲の半分を掛ける。
+        unit = jax.nn.sigmoid(std_raw + 2.0)
+        norm_std = (self.max_std - self.min_std) * unit + self.min_std
+        std = norm_std * half
         return distrax.MultivariateNormalDiag(loc=mean, scale_diag=std)
 
 
