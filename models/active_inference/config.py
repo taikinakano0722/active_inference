@@ -71,9 +71,6 @@ class Config:
     # 系列を切れるようになる前のステップは、この比に含めない。
     train_ratio: float = 32.0
     train_steps: int = 200
-    # 固定エポック数。train() の更新回数は train_ratio が決めるので、これらは読まない。
-    wm_epochs: int = 50
-    policy_epochs: int = 20
     seed: int = 0
 
     # 追加の任意キー
