@@ -8,6 +8,8 @@ train.py が呼ぶ処理は、このファイルに関数として並んでい�
   事後状態から未来を想像し、期待自由エネルギーが小さくなるよう方策だけを動かす。
 - 環境との1ステップ: get_posterior_state で観測を状態に畳み、select_action で1手出す。
   候補モードと方策モードの分岐は select_action にある。
+  収集ループは step_latent_and_action でこの2つを1つの JIT にする。毎ステップ
+  グラフを組み直さないため。
 
 ネットワークの中身（RSSM の prior / posterior、EFE の式）は rssm.py と efe.py にある。
 ここはそれらをバッチと時間に広げ、損失と更新にまとめる場所である。
@@ -165,7 +167,7 @@ def _actions_to_array(
     return jnp.concatenate(parts, axis=-1)
 
 
-def world_model_loss(
+def _world_model_forward(
     agent: Agent,
     obs: dict[str, jnp.ndarray],
     act: dict[str, jnp.ndarray],
@@ -173,19 +175,14 @@ def world_model_loss(
     reset: jnp.ndarray,
     config: Config,
     key: jax.Array,
-) -> tuple[jnp.ndarray, dict[str, jnp.ndarray]]:
-    """実データの系列に対する世界モデルの損失。小さいほどよい。
-
-    obs: (B, T+1, ...)  reset 観測を含む
-    act: (B, T, ...)
-    rew: (B, T)
-    reset: (B, T)  各ステップ開始時に状態をリセットするか
+) -> tuple[jnp.ndarray, dict[str, jnp.ndarray], dict[str, jnp.ndarray]]:
+    """実系列を1回 observe し、損失と各時刻の outs を返す。
 
     損失は3項の和。
       recon: 事後状態から観測を再構成した対数尤度の符号反転。
       reward: 同じ状態から報酬を予測した対数尤度の符号反転。
       kl: 事前側（dyn）と事後側（rep）で勾配を分けた KL を、それぞれの係数で足したもの。
-    この和が、変分自由エネルギーに相当する学習目標である。
+    outs の末尾は、方策学習の想像の開始状態に使える。
     """
     B = rew.shape[0]
     T = rew.shape[1]
@@ -207,7 +204,7 @@ def world_model_loss(
         return agent.rssm.observe(init_state, actions_t, embeds_t, resets_t, k)
 
     # observe は系列1本用。vmap で B 本を同時に進める。
-    finals, outs = jax.vmap(observe_one)(
+    _finals, outs = jax.vmap(observe_one)(
         init_batch, actions, embeds, reset, keys
     )
     # outs: 各値 (B, T, ...)
@@ -259,7 +256,55 @@ def world_model_loss(
         "state/prior_entropy": outs["prior_entropy"].mean(),
         "state/post_entropy": outs["post_entropy"].mean(),
     }
+    return total, metrics, outs
+
+
+def world_model_loss(
+    agent: Agent,
+    obs: dict[str, jnp.ndarray],
+    act: dict[str, jnp.ndarray],
+    rew: jnp.ndarray,
+    reset: jnp.ndarray,
+    config: Config,
+    key: jax.Array,
+) -> tuple[jnp.ndarray, dict[str, jnp.ndarray]]:
+    """実データの系列に対する世界モデルの損失。小さいほどよい。
+
+    obs: (B, T+1, ...)  reset 観測を含む
+    act: (B, T, ...)
+    rew: (B, T)
+    reset: (B, T)  各ステップ開始時に状態をリセットするか
+
+    この和が、変分自由エネルギーに相当する学習目標である。
+    """
+    total, metrics, _outs = _world_model_forward(
+        agent, obs, act, rew, reset, config, key
+    )
     return total, metrics
+
+
+def world_model_loss_and_starts(
+    agent: Agent,
+    obs: dict[str, jnp.ndarray],
+    act: dict[str, jnp.ndarray],
+    rew: jnp.ndarray,
+    reset: jnp.ndarray,
+    config: Config,
+    key: jax.Array,
+) -> tuple[jnp.ndarray, dict[str, jnp.ndarray], dict[str, jnp.ndarray]]:
+    """世界モデル損失と、同じ observe の末尾事後状態を返す。
+
+    末尾は stop_gradient 済み。方策の想像の開始点に使い、世界モデルへ
+    方策勾配を流さない。
+    """
+    total, metrics, outs = _world_model_forward(
+        agent, obs, act, rew, reset, config, key
+    )
+    starts = {
+        "deter": jax.lax.stop_gradient(outs["deter"][:, -1]),
+        "stoch": jax.lax.stop_gradient(outs["stoch"][:, -1]),
+    }
+    return total, metrics, starts
 
 
 def policy_loss(
@@ -390,22 +435,9 @@ def make_policy_step(config: Config):
     def step(agent, opt_state, start_states, key):
         # 進め方では方策だけ更新する。世界モデル側へは勾配を流さない。
         def wrapped(agent_):
-            agent_sg = eqx.tree_at(
-                lambda a: (
-                    a.encoder,
-                    a.rssm,
-                    a.obs_decoder,
-                    a.reward_decoder,
-                ),
-                agent_,
-                (
-                    jax.tree.map(jax.lax.stop_gradient, agent_.encoder),
-                    jax.tree.map(jax.lax.stop_gradient, agent_.rssm),
-                    jax.tree.map(jax.lax.stop_gradient, agent_.obs_decoder),
-                    jax.tree.map(jax.lax.stop_gradient, agent_.reward_decoder),
-                ),
+            return policy_loss(
+                _stop_world_model(agent_), start_states, config, key
             )
-            return policy_loss(agent_sg, start_states, config, key)
 
         (loss, metrics), grads = eqx.filter_value_and_grad(wrapped, has_aux=True)(
             agent
@@ -419,26 +451,165 @@ def make_policy_step(config: Config):
     return optimizer, step
 
 
+def _stop_world_model(agent: Agent) -> Agent:
+    """方策損失用に、世界モデル側の配列の勾配を止めたコピーを返す。"""
+    return eqx.tree_at(
+        lambda a: (
+            a.encoder,
+            a.rssm,
+            a.obs_decoder,
+            a.reward_decoder,
+        ),
+        agent,
+        (
+            jax.tree.map(jax.lax.stop_gradient, agent.encoder),
+            jax.tree.map(jax.lax.stop_gradient, agent.rssm),
+            jax.tree.map(jax.lax.stop_gradient, agent.obs_decoder),
+            jax.tree.map(jax.lax.stop_gradient, agent.reward_decoder),
+        ),
+    )
+
+
+def make_joint_step(config: Config):
+    """世界モデルと方策を、同じバッチ・1回の observe で更新する関数を返す。
+
+    step(agent, wm_opt_state, pol_opt_state, batch, key) は次を1つの JIT で行う。
+      1. 系列を observe し、世界モデル損失と末尾の事後状態を得る。
+      2. 世界モデルを Adam で1回更新する。
+      3. その末尾状態から想像し、方策だけを Adam で1回更新する。
+    世界モデルと方策のオプティマイザ状態は別々に持つ。
+    """
+    wm_optimizer = optax.chain(
+        optax.clip_by_global_norm(config.grad_clip),
+        optax.adam(config.lr),
+    )
+    pol_optimizer = optax.chain(
+        optax.clip_by_global_norm(config.grad_clip),
+        optax.adam(config.policy_lr),
+    )
+
+    @eqx.filter_jit
+    def step(agent, wm_opt_state, pol_opt_state, batch, key):
+        k_wm, k_pol = jax.random.split(key)
+
+        def wm_fn(agent_):
+            loss, metrics, starts = world_model_loss_and_starts(
+                agent_,
+                batch["obs"],
+                batch["act"],
+                batch["rew"],
+                batch["reset"],
+                config,
+                k_wm,
+            )
+            # has_aux は (loss, aux) の2要素。metrics と starts は1つの aux にまとめる。
+            return loss, (metrics, starts)
+
+        (wm_loss, (wm_metrics, starts)), wm_grads = eqx.filter_value_and_grad(
+            wm_fn, has_aux=True
+        )(agent)
+        wm_updates, wm_opt_state = wm_optimizer.update(
+            wm_grads, wm_opt_state, eqx.filter(agent, eqx.is_inexact_array)
+        )
+        agent = eqx.apply_updates(agent, wm_updates)
+
+        def pol_fn(agent_):
+            return policy_loss(_stop_world_model(agent_), starts, config, k_pol)
+
+        (pol_loss, pol_metrics), pol_grads = eqx.filter_value_and_grad(
+            pol_fn, has_aux=True
+        )(agent)
+        pol_updates, pol_opt_state = pol_optimizer.update(
+            pol_grads, pol_opt_state, eqx.filter(agent, eqx.is_inexact_array)
+        )
+        agent = eqx.apply_updates(agent, pol_updates)
+        metrics = {
+            **wm_metrics,
+            **pol_metrics,
+            "loss/joint": wm_loss + pol_loss,
+        }
+        return agent, wm_opt_state, pol_opt_state, wm_loss + pol_loss, metrics
+
+    return wm_optimizer, pol_optimizer, step
+
+
 def get_posterior_state(
     agent: Agent,
     prev_state: dict[str, jnp.ndarray],
     action: jnp.ndarray,
     obs: dict[str, jnp.ndarray],
     key: jax.Array,
-    is_first: bool = False,
+    is_first: bool | jnp.ndarray = False,
 ) -> dict[str, jnp.ndarray]:
     """環境ループの1ステップ分。直前の状態・行動・今の観測から事後状態を返す。
 
     学習時の observe は系列をまとめて進めるが、行動中は観測が1件ずつ届く。
     ここで posterior を1回だけ呼ぶ。is_first のときは渡された状態と行動を捨て、
     ゼロ状態と零行動から始める。エピソード先頭には履歴が無いため。
+
+    is_first は bool か、スカラーの jnp.bool_。JIT の中では jnp.where で分岐し、
+    先頭とそれ以外で別コンパイルにならないようにする。
     """
-    if is_first:
-        prev_state = agent.rssm.initial()
-        action = jnp.zeros_like(action)
+    is_first = jnp.asarray(is_first, dtype=bool)
+    zero_state = agent.rssm.initial()
+    prev_state = jax.tree.map(
+        lambda s, z: jnp.where(is_first, z, s), prev_state, zero_state
+    )
+    action = jnp.where(is_first, jnp.zeros_like(action), action)
     embed = agent.encoder(obs)
     post, _, _ = agent.rssm.posterior(prev_state, action, embed, key)
     return post
+
+
+class _ActionSettings:
+    """行動選択が読む設定だけを持つ。
+
+    Config は dataclass なので JAX が pytree とみなし、extras の dict で
+    JIT のトレースが止まる。ここは pytree にしない。
+    """
+
+    def __init__(
+        self,
+        action_mode: str,
+        efe_mode: str,
+        horizon: int,
+        candidate_count: int,
+        epistemic_weight: float,
+        pragmatic_weight: float,
+    ):
+        self.action_mode = action_mode
+        self.efe_mode = efe_mode
+        self.horizon = horizon
+        self.candidate_count = candidate_count
+        self.epistemic_weight = epistemic_weight
+        self.pragmatic_weight = pragmatic_weight
+
+
+def _action_vector(
+    agent: Agent,
+    state: dict[str, jnp.ndarray],
+    config: Config | _ActionSettings,
+    key: jax.Array,
+) -> tuple[jnp.ndarray, dict[str, Any]]:
+    """事後状態から行動ベクトルを1つ返す。numpy には変換しない。"""
+    if config.action_mode == "candidate":
+        planner = CandidatePlanner()
+        action_vec, info = planner.plan(
+            agent.rssm,
+            agent.reward_decoder,
+            agent.encoder,
+            agent.obs_decoder,
+            state,
+            agent.act_space,
+            config,
+            key,
+        )
+        return action_vec.astype(jnp.float32), info
+
+    feat = agent.rssm.feature(state)
+    dist = agent.policy(feat)
+    action = dist.sample(seed=key)
+    return action.astype(jnp.float32), {"efe": None}
 
 
 def select_action(
@@ -455,27 +626,49 @@ def select_action(
       方策ネットの重みは見ない。
     - "policy": 方策ネットの分布から行動を1つサンプルする。想像はここでは回さない。
     返り値は環境が受け取る行動辞書。最初のモデルは行動キーが1つ。
+    収集ループは、この関数ではなく step_latent_and_action を使う。
     """
     act_key = next(iter(agent.act_space.keys()))
-    if config.action_mode == "candidate":
-        planner = CandidatePlanner()
-        action_vec, info = planner.plan(
-            agent.rssm,
-            agent.reward_decoder,
-            agent.encoder,
-            agent.obs_decoder,
-            state,
-            agent.act_space,
-            config,
-            key,
-        )
-        return {act_key: np_from_jax(action_vec)}, info
+    action_vec, info = _action_vector(agent, state, config, key)
+    return {act_key: np_from_jax(action_vec)}, info
 
-    # policy mode
-    feat = agent.rssm.feature(state)
-    dist = agent.policy(feat)
-    action = dist.sample(seed=key)
-    return {act_key: np_from_jax(action)}, {"efe": None}
+
+@eqx.filter_jit
+def step_latent_and_action(
+    agent: Agent,
+    prev_state: dict[str, jnp.ndarray],
+    prev_action: jnp.ndarray,
+    obs: dict[str, jnp.ndarray],
+    key_post: jax.Array,
+    key_act: jax.Array,
+    is_first: jnp.ndarray,
+    action_mode: str,
+    efe_mode: str,
+    horizon: int,
+    candidate_count: int,
+    epistemic_weight: float,
+    pragmatic_weight: float,
+) -> tuple[dict[str, jnp.ndarray], dict[str, jnp.ndarray]]:
+    """観測1件から事後状態と行動を返す。収集ループの1手。
+
+    モード、ホライズン、重みはコンパイルのキーに入る。is_first はスカラーの
+    jnp.bool_ で、jnp.where で分岐するため、先頭とそれ以外で別コンパイルに
+    ならない。重みが変わったあとのエージェントは、同じコンパイル結果を使う。
+    """
+    state = get_posterior_state(
+        agent, prev_state, prev_action, obs, key_post, is_first=is_first
+    )
+    settings = _ActionSettings(
+        action_mode=action_mode,
+        efe_mode=efe_mode,
+        horizon=int(horizon),
+        candidate_count=int(candidate_count),
+        epistemic_weight=float(epistemic_weight),
+        pragmatic_weight=float(pragmatic_weight),
+    )
+    action_vec, _ = _action_vector(agent, state, settings, key_act)
+    act_key = next(iter(agent.act_space.keys()))
+    return state, {act_key: action_vec}
 
 
 def np_from_jax(x: jnp.ndarray):
