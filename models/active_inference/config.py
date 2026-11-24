@@ -38,12 +38,18 @@ class Config:
     batch_size: int = 32
     seq_len: int = 50
     free_nats: float = 1.0
-    kl_balance: float = 0.8  # dyn 側の重み。rep は 1 - kl_balance
+    # dyn は事前側、rep は事後側への KL の係数。DreamerV3 の loss_scales に合わせる。
+    dyn_scale: float = 1.0
+    rep_scale: float = 0.1
     kl_scale: float = 1.0
     gamma: float = 0.99
 
     # 環境ループ
+    # random_episodes が 1 以上のときは、その本数だけエピソードを終端まで集める（既定）。
+    # 0 のときだけ random_steps を使い、合計ステップ数で収集量を指定する。
+    # その場合、done が来ればそこでチャンクを区切り、残りのステップは次のエピソードで集める。
     random_episodes: int = 20
+    random_steps: int = 0
     train_steps: int = 200
     wm_epochs: int = 50
     policy_epochs: int = 20

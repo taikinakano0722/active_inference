@@ -176,7 +176,7 @@ def world_model_loss(
     損失は3項の和。
       recon: 事後状態から観測を再構成した対数尤度の符号反転。
       reward: 同じ状態から報酬を予測した対数尤度の符号反転。
-      kl: 各時刻の事後分布と、行動だけから出した事前分布の KL。
+      kl: 事前側（dyn）と事後側（rep）で勾配を分けた KL を、それぞれの係数で足したもの。
     この和が、変分自由エネルギーに相当する学習目標である。
     """
     B = rew.shape[0]
@@ -203,17 +203,12 @@ def world_model_loss(
         init_batch, actions, embeds, reset, keys
     )
     # outs: 各値 (B, T, ...)
-    # KL balancing
-    # observe 内の kl は post||prior
-    kl = outs["kl"]  # (B, T)
-    # free nats
-    # KL が free_nats 未満の時刻は、損失値が free_nats で止まり、
-    # その時刻の KL をさらに小さくする勾配は出ない。すでに近い事前と事後は罰しない。
-    kl_dyn = jnp.maximum(kl, config.free_nats)
-    # ここでは dyn/rep を同じ kl で近似し、重みだけ分ける。
-    # kl_balance は下限で切った項の重み、(1 - kl_balance) は切る前の KL の重み。
+    # kl_dyn は事後を止めた KL、kl_rep は事前を止めた KL。順伝播の値は同じ。
+    # free_nats 未満の時刻は定数になり、その項から勾配は出ない。
+    kl_dyn = jnp.maximum(outs["kl_dyn"], config.free_nats)
+    kl_rep = jnp.maximum(outs["kl_rep"], config.free_nats)
     kl_loss = config.kl_scale * (
-        config.kl_balance * kl_dyn + (1.0 - config.kl_balance) * kl
+        config.dyn_scale * kl_dyn + config.rep_scale * kl_rep
     )
 
     def decode_loss_t(deter, stoch, obs_t, rew_t):
@@ -251,6 +246,8 @@ def world_model_loss(
         "loss/recon": recon_loss,
         "loss/reward": rew_loss,
         "loss/kl": kl_mean,
+        "loss/dyn": (config.kl_scale * config.dyn_scale * kl_dyn).mean(),
+        "loss/rep": (config.kl_scale * config.rep_scale * kl_rep).mean(),
         "state/prior_entropy": outs["prior_entropy"].mean(),
         "state/post_entropy": outs["post_entropy"].mean(),
     }

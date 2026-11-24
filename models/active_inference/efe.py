@@ -59,11 +59,11 @@ def _kl_from_imagined_obs(
     embed = encoder(obs)
     # 行動ゼロで「同じ deter 上の事後」を近似するため、
     # deter を固定し、posterior_net だけを再計算する。
+    # 事後の入力は deter と埋め込みだけで、事前サンプルは含めない。
     prior_dist = rssm.dist_from_stats(prior_stats)
     x = jnp.concatenate(
         [
             state["deter"],
-            rssm._flatten_stoch(state["stoch"]),
             embed.reshape(-1),
         ],
         axis=-1,

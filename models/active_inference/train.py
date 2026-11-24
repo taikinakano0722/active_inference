@@ -6,7 +6,8 @@ agent.py の make_wm_step / make_policy_step に委譲する。
 
 一段落で通る流れは次の5段階。
 
-1. ランダム行動でエピソードを集め、リプレイバッファに入れる。
+1. ランダム行動でデータを集め、リプレイバッファに入れる。
+   既定はエピソード本数。random_episodes が 0 のときは random_steps ステップ。
 2. そのデータで世界モデル（エンコーダ、RSSM、観測デコーダ、報酬デコーダ）を学ぶ。
 3. 候補モードで行動し、ランダムの平均リターンと比べる。方策の重みはまだ更新しない。
 4. バッファ上の事後状態を開始点にして、方策ネットを学ぶ。
@@ -44,6 +45,7 @@ def collect_episode(
     config: Config,
     key: jax.Array,
     random: bool = False,
+    max_steps: int | None = None,
 ) -> tuple[dict[str, Any], float, jax.Array]:
     """環境と1エピソード対話し、遷移の辞書と合計報酬を返す。
 
@@ -54,6 +56,11 @@ def collect_episode(
     - random=True、または agent が None: 環境の一様サンプル。世界モデル学習用の収集。
     - それ以外: 今の観測を事後状態に畳み込み、select_action で1手選ぶ。
       config.action_mode が "candidate" なら候補列の比較、"policy" なら方策ネット。
+
+    max_steps が None のときは、環境が done を返すまで続ける。
+    数を渡したときは、done より先でもその歩数で打ち切る。継続する環境では
+    done が来ないので、歩数を渡さないとこの関数は戻らない。
+    打ち切ったチャンクの末尾 done は False になり得る。
 
     episode["obs"] は reset 直後の観測を先頭に含むので、長さは行動の数より1大きい。
     act / rew / done の長さはステップ数 T。後段の世界モデルは
@@ -75,8 +82,10 @@ def collect_episode(
     total_reward = 0.0
     # 最初の1回だけ、事後更新は渡された状態を捨てて RSSM のゼロ状態から始める。
     is_first = True
+    n_collected = 0
 
-    while not done:
+    # max_steps が None のときは done まで。数を渡したときは、その歩数か done の早い方で止める。
+    while not done and (max_steps is None or n_collected < max_steps):
         # JAX の乱数キーは消費する。k_act は行動のサンプル用、k_post は事後分布のサンプル用。
         key, k_act, k_post = jax.random.split(key, 3)
         if random or agent is None:
@@ -111,8 +120,51 @@ def collect_episode(
         prev_action = flatten_action(action_jax, env.act_space)
         obs = next_obs
         is_first = False
+        n_collected += 1
 
     return episode, total_reward, key
+
+
+def collect_random(
+    env: Point1DEnv,
+    config: Config,
+    key: jax.Array,
+) -> tuple[list[dict[str, Any]], list[float], jax.Array]:
+    """ランダム行動のデータを集め、チャンクのリストと各チャンクの合計報酬を返す。
+
+    random_episodes が 1 以上のときは、その本数だけエピソードが終わるまで集める。
+    0 のときは random_steps ステップ集める。done が先に来たチャンクはそこで区切り、
+    残りの歩数は新しいエピソードとして続ける。各チャンクは reset から始まる。
+    """
+    chunks: list[dict[str, Any]] = []
+    returns: list[float] = []
+    if config.random_episodes == 0:
+        if config.random_steps <= 0:
+            raise ValueError(
+                "random_episodes が 0 のときは random_steps に"
+                " 1 以上のステップ数を指定してください。"
+            )
+        remaining = int(config.random_steps)
+        while remaining > 0:
+            key, k_ep = jax.random.split(key)
+            # agent に None を渡すと、collect_episode はランダム行動の枝だけを通る。
+            ep, ret, key = collect_episode(
+                env, None, config, k_ep, random=True, max_steps=remaining
+            )
+            taken = len(ep["rew"])
+            if taken <= 0:
+                raise RuntimeError("ステップを1つも集められませんでした。")
+            chunks.append(ep)
+            returns.append(ret)
+            remaining -= taken
+    else:
+        for _ in range(config.random_episodes):
+            key, k_ep = jax.random.split(key)
+            # agent に None を渡すと、collect_episode はランダム行動の枝だけを通る。
+            ep, ret, key = collect_episode(env, None, config, k_ep, random=True)
+            chunks.append(ep)
+            returns.append(ret)
+    return chunks, returns, key
 
 
 def batch_to_jax(batch: dict[str, Any]) -> dict[str, Any]:
@@ -194,7 +246,10 @@ def train(config: Config | None = None, discrete: bool = True) -> Agent:
     # 行動選択で想像する未来の長さ。候補モードも方策モードもこの値を共有する。
     config.horizon = 4
     config.candidate_count = 81  # 3^4 = 81 で離散全列挙
-    config.random_episodes = 30
+    # 呼び出し側が random_episodes=0 にしたときだけ、random_steps による収集を残す。
+    # それ以外は、この Point1D 実験の既定であるエピソード本数にする。
+    if config.random_episodes != 0:
+        config.random_episodes = 30
     config.wm_epochs = 40
     config.policy_epochs = 30
     # 情報利得は、想像した stoch の事前エントロピー。観測をデコードし直す KL は使わない。
@@ -214,15 +269,15 @@ def train(config: Config | None = None, discrete: bool = True) -> Agent:
 
     # --- 1. ランダム収集 ---------------------------------------------------
     # 世界モデルは、自分が選んだ行動ではなく、一様な行動の軌道から先に学ぶ。
+    # 既定はエピソード本数。random_episodes が 0 のときだけステップ数で集める。
     buffer = ReplayBuffer(capacity=500)
-    print(f"Collecting {config.random_episodes} random episodes...")
-    returns = []
-    for i in range(config.random_episodes):
-        key, k_ep = jax.random.split(key)
-        # agent に None を渡すと、collect_episode はランダム行動の枝だけを通る。
-        ep, ret, key = collect_episode(env, None, config, k_ep, random=True)
+    if config.random_episodes == 0:
+        print(f"Collecting {config.random_steps} random steps...")
+    else:
+        print(f"Collecting {config.random_episodes} random episodes...")
+    chunks, returns, key = collect_random(env, config, key)
+    for ep in chunks:
         buffer.add_episode(ep)
-        returns.append(ret)
     print(f"  mean return: {np.mean(returns):.3f}")
 
     # --- 2. 世界モデルの学習 -----------------------------------------------

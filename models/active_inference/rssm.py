@@ -68,9 +68,9 @@ class RSSM(eqx.Module):
             post_out = stoch_dim * stoch_classes
 
         self.prior_net = MLP(deter_dim, prior_out, hidden_dim, layers=2, key=k3)
-        # posterior は deter + stoch_flat + embed
+        # 事後は更新後の deter と観測埋め込みだけを見る。事前サンプルは入れない。
         self.posterior_net = MLP(
-            deter_dim + stoch_flat + embed_dim,
+            deter_dim + embed_dim,
             post_out,
             hidden_dim,
             layers=2,
@@ -125,15 +125,24 @@ class RSSM(eqx.Module):
         x = jax.nn.elu(self.rnn_in(x))
         return self.gru(x, prev_state["deter"])
 
+    def _prior_dist(
+        self,
+        prev_state: dict[str, jnp.ndarray],
+        action: jnp.ndarray,
+    ) -> tuple[jnp.ndarray, distrax.Distribution]:
+        """deter を1歩進め、事前分布を返す。stoch はサンプルしない。"""
+        deter = self._core(prev_state, action)
+        dist = self._stats_to_dist(self.prior_net(deter))
+        return deter, dist
+
     def prior(
         self,
         prev_state: dict[str, jnp.ndarray],
         action: jnp.ndarray,
         key: jax.Array,
     ) -> tuple[dict[str, jnp.ndarray], distrax.Distribution]:
-        deter = self._core(prev_state, action)
-        stats = self.prior_net(deter)
-        dist = self._stats_to_dist(stats)
+        """事前分布から stoch を1つ引き、次の状態にする。想像でのみ使う。"""
+        deter, dist = self._prior_dist(prev_state, action)
         stoch = self._sample(dist, key)
         state = {"deter": deter, "stoch": stoch}
         return state, dist
@@ -145,13 +154,12 @@ class RSSM(eqx.Module):
         obs_embed: jnp.ndarray,
         key: jax.Array,
     ) -> tuple[dict[str, jnp.ndarray], distrax.Distribution, distrax.Distribution]:
-        """prior を踏み、観測埋め込みで事後を出す。"""
-        prior_state, prior_dist = self.prior(prev_state, action, key)
-        # prior のサンプルは事後ネットの入力にも使う（contrastive-aif と同じ）。
+        """deter と事前分布を作り、観測埋め込みで事後を出す。事前の stoch は引かない。"""
+        deter, prior_dist = self._prior_dist(prev_state, action)
+        # 事後ネットは deter と観測だけ。KL には事前分布を使い、サンプルは要らない。
         x = jnp.concatenate(
             [
-                prior_state["deter"],
-                self._flatten_stoch(prior_state["stoch"]),
+                deter,
                 obs_embed.astype(jnp.float32).reshape(-1),
             ],
             axis=-1,
@@ -161,13 +169,23 @@ class RSSM(eqx.Module):
         # 事後サンプル用に別キーが欲しいが、単一 key しか無いときは split。
         key2 = jax.random.fold_in(key, 1)
         stoch = self._sample(post_dist, key2)
-        post_state = {"deter": prior_state["deter"], "stoch": stoch}
+        post_state = {"deter": deter, "stoch": stoch}
         return post_state, prior_dist, post_dist
 
     def _dist_stats(self, dist: distrax.Distribution) -> jnp.ndarray:
         if self.stoch_type == "gaussian":
             return jnp.concatenate([dist.loc, dist.scale_diag], axis=-1)
         return dist.distribution.logits.reshape(-1)
+
+    def _stop_dist(self, dist: distrax.Distribution) -> distrax.Distribution:
+        """分布パラメータの勾配を止めた複製。KL の dyn / rep を分けるときに使う。"""
+        if self.stoch_type == "gaussian":
+            return distrax.MultivariateNormalDiag(
+                loc=jax.lax.stop_gradient(dist.loc),
+                scale_diag=jax.lax.stop_gradient(dist.scale_diag),
+            )
+        logits = jax.lax.stop_gradient(dist.distribution.logits)
+        return distrax.Independent(distrax.OneHotCategorical(logits=logits), 1)
 
     def observe(
         self,
@@ -198,12 +216,18 @@ class RSSM(eqx.Module):
             else:
                 prior_mean = prior_dist.distribution.logits
                 post_mean = post_dist.distribution.logits
+            # kl は勾配を分けない参照値。損失に使うのは次の2本。
+            # kl_dyn: 事後を止め、事前（ダイナミクス）だけを事後へ近づける。
+            # kl_rep: 事前を止め、事後（表現）だけを事前へ近づける。
+            # 順伝播の値は3つとも同じ KL(事後‖事前) になる。
             out = {
                 "deter": post_state["deter"],
                 "stoch": post_state["stoch"],
                 "prior_mean": prior_mean,
                 "post_mean": post_mean,
                 "kl": post_dist.kl_divergence(prior_dist),
+                "kl_dyn": self._stop_dist(post_dist).kl_divergence(prior_dist),
+                "kl_rep": post_dist.kl_divergence(self._stop_dist(prior_dist)),
                 "prior_entropy": prior_dist.entropy(),
                 "post_entropy": post_dist.entropy(),
                 "prior_stats": self._dist_stats(prior_dist),
