@@ -1,28 +1,30 @@
-"""学習ループ。ランダム収集 → 世界モデル → 候補/方策。
+"""学習ループ。収集して世界モデルを更新し、方策モードなら方策も更新する。
 
-このファイルが実行の入口である。処理は train() に上から順に書いてあり、
-環境との対話は collect_episode() だけが行う。重みの更新そのものは
-agent.py の make_wm_step / make_policy_step に委譲する。
+このファイルが実行の入口である。環境との対話は collect_episode() だけが行う。
+重みの更新そのものは agent.py の make_wm_step / make_policy_step に委譲する。
 
-一段落で通る流れは次の5段階。
+train() は環境と設定を受け取る繰り返しで、環境ごとの数値は持たない。
 
-1. ランダム行動でエピソードを集め、リプレイバッファに入れる。
-2. そのデータで世界モデル（エンコーダ、RSSM、観測デコーダ、報酬デコーダ）を学ぶ。
-3. 候補モードで行動し、ランダムの平均リターンと比べる。方策の重みはまだ更新しない。
-4. バッファ上の事後状態を開始点にして、方策ネットを学ぶ。
-5. 方策モードで行動し、再びランダムの平均リターンと比べる。
+行動は select_action に一本化する。random_initial が真のときだけ、
+1周目の行動を環境の一様サンプルにする。
+
+更新回数は固定エポックではなく train_ratio で決める。新しい環境ステップに比例し、
+チャンクをバッファへ入れた直後に行う。系列を切れる前は更新しない。
+1回の更新は世界モデルのミニバッチ1回と、方策モードなら方策のミニバッチ1回。
+
+1周目の量は random_episodes / random_steps、2周目以降は collect_episodes / collect_steps。
+一般に1周目のほうが多い。episodes が 1 以上ならその本数、0 なら steps ステップ。
+done が来たチャンクはそこで区切る。
 """
 
 from __future__ import annotations
 
-import argparse
-from typing import Any
+from typing import Any, Protocol
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
-import optax
 
 from active_inference.agent import (
     Agent,
@@ -30,20 +32,117 @@ from active_inference.agent import (
     make_policy_step,
     make_wm_step,
     select_action,
-    world_model_loss,
 )
 from active_inference.config import Config
-from active_inference.envs.point1d import Point1DEnv
 from active_inference.replay_buffer import ReplayBuffer
-from active_inference.spaces import action_dim, flatten_action
+from active_inference.spaces import Space, action_dim, flatten_action
+
+
+class Env(Protocol):
+    """収集と学習が環境に求めるもの。reset / step / sample_action と二つの空間。"""
+
+    obs_space: dict[str, Space]
+    act_space: dict[str, Space]
+
+    def reset(
+        self, seed: int | None = None
+    ) -> tuple[dict[str, np.ndarray], dict[str, Any]]: ...
+
+    def step(
+        self, action: dict[str, np.ndarray]
+    ) -> tuple[dict[str, np.ndarray], float, bool, dict[str, Any]]: ...
+
+    def sample_action(self) -> dict[str, np.ndarray]: ...
+
+
+def _require_collection(
+    episodes: int,
+    steps: int,
+    episodes_name: str,
+    steps_name: str,
+) -> tuple[int, int]:
+    """episodes が 1 以上ならその本数。0 なら steps。
+
+    戻り値は (使うエピソード数, 使うステップ数)。使わない側は 0。
+    """
+    if episodes < 0:
+        raise ValueError(f"{episodes_name} は 0 以上にしてください。")
+    if episodes == 0:
+        if steps <= 0:
+            raise ValueError(
+                f"{episodes_name} が 0 のときは {steps_name} に"
+                " 1 以上のステップ数を指定してください。"
+            )
+        return 0, int(steps)
+    return int(episodes), 0
+
+
+class TrainRatio:
+    """集めた環境ステップから、勾配更新の回数を決める。
+
+    DreamerV3 の train_ratio と同じ比である。
+    更新 1 回は batch_steps（batch_size * seq_len）ステップをリプレイから使う。
+    したがって新しいステップ n に対する更新回数は train_ratio * n / batch_steps。
+    端数は切り捨て、余りは次の呼び出しへ持ち越す。
+    """
+
+    def __init__(self, train_ratio: float, batch_steps: int):
+        if train_ratio < 0:
+            raise ValueError("train_ratio は 0 以上にしてください。")
+        if batch_steps < 1:
+            raise ValueError("batch_steps は 1 以上にしてください。")
+        self._rate = float(train_ratio) / float(batch_steps)
+        self._step = 0
+
+    def updates_for(self, new_steps: int) -> int:
+        if new_steps < 0:
+            raise ValueError("new_steps は 0 以上にしてください。")
+        prev = self._step
+        self._step += int(new_steps)
+        return int(self._rate * self._step) - int(self._rate * prev)
+
+
+def _validate_train_config(config: Config) -> None:
+    """学習を始める前に、周回数と二つの収集量を確かめる。"""
+    if config.n_rounds < 1:
+        raise ValueError("n_rounds は 1 以上にしてください。")
+    if config.train_ratio < 0:
+        raise ValueError("train_ratio は 0 以上にしてください。")
+    if config.batch_size < 1 or config.seq_len < 1:
+        raise ValueError("batch_size と seq_len は 1 以上にしてください。")
+    if config.action_mode not in ("policy", "candidate"):
+        raise ValueError(
+            "action_mode は 'policy' か 'candidate' にしてください。"
+            f" 受け取った値: {config.action_mode}"
+        )
+    # 方策の損失は想像中に KL を渡さない。efe_mode が kl だとそこで落ちる。
+    if config.action_mode == "policy" and config.efe_mode != "entropy":
+        raise ValueError(
+            "方策の更新は想像中に KL を計算しないため、efe_mode は 'entropy' にしてください。"
+        )
+    _require_collection(
+        config.random_episodes,
+        config.random_steps,
+        "random_episodes",
+        "random_steps",
+    )
+    # 2周目があるのに収集量が無いと、1周目の学習が終わってから失敗する。
+    if config.n_rounds > 1:
+        _require_collection(
+            config.collect_episodes,
+            config.collect_steps,
+            "collect_episodes",
+            "collect_steps",
+        )
 
 
 def collect_episode(
-    env: Point1DEnv,
+    env: Env,
     agent: Agent | None,
     config: Config,
     key: jax.Array,
     random: bool = False,
+    max_steps: int | None = None,
 ) -> tuple[dict[str, Any], float, jax.Array]:
     """環境と1エピソード対話し、遷移の辞書と合計報酬を返す。
 
@@ -54,6 +153,11 @@ def collect_episode(
     - random=True、または agent が None: 環境の一様サンプル。世界モデル学習用の収集。
     - それ以外: 今の観測を事後状態に畳み込み、select_action で1手選ぶ。
       config.action_mode が "candidate" なら候補列の比較、"policy" なら方策ネット。
+
+    max_steps が None のときは、環境が done を返すまで続ける。
+    数を渡したときは、done より先でもその歩数で打ち切る。継続する環境では
+    done が来ないので、歩数を渡さないとこの関数は戻らない。
+    打ち切ったチャンクの末尾 done は False になり得る。
 
     episode["obs"] は reset 直後の観測を先頭に含むので、長さは行動の数より1大きい。
     act / rew / done の長さはステップ数 T。後段の世界モデルは
@@ -75,8 +179,10 @@ def collect_episode(
     total_reward = 0.0
     # 最初の1回だけ、事後更新は渡された状態を捨てて RSSM のゼロ状態から始める。
     is_first = True
+    n_collected = 0
 
-    while not done:
+    # max_steps が None のときは done まで。数を渡したときは、その歩数か done の早い方で止める。
+    while not done and (max_steps is None or n_collected < max_steps):
         # JAX の乱数キーは消費する。k_act は行動のサンプル用、k_post は事後分布のサンプル用。
         key, k_act, k_post = jax.random.split(key, 3)
         if random or agent is None:
@@ -111,8 +217,87 @@ def collect_episode(
         prev_action = flatten_action(action_jax, env.act_space)
         obs = next_obs
         is_first = False
+        n_collected += 1
 
     return episode, total_reward, key
+
+
+def collect_chunks(
+    env: Env,
+    agent: Agent | None,
+    config: Config,
+    key: jax.Array,
+    *,
+    episodes: int,
+    steps: int,
+    random: bool,
+    episodes_name: str = "episodes",
+    steps_name: str = "steps",
+) -> tuple[list[dict[str, Any]], list[float], jax.Array]:
+    """チャンクを集め、チャンクのリストと各チャンクの合計報酬を返す。
+
+    episodes が 1 以上のときは、その本数だけエピソードが終わるまで集める。
+    0 のときは steps ステップ集める。done が先に来たチャンクはそこで区切り、
+    残りの歩数は新しいエピソードとして続ける。各チャンクは reset から始まる。
+
+    random=True のときは一様な行動。False のときは agent の select_action。
+    戻り値の形は、どちらの集め方でも、どの環境でも同じ。
+    """
+    n_episodes, n_steps = _require_collection(
+        episodes, steps, episodes_name, steps_name
+    )
+    if not random and agent is None:
+        raise ValueError("モデルで集めるときは agent が必要です。")
+    chunks: list[dict[str, Any]] = []
+    returns: list[float] = []
+    # random のときは agent に None を渡し、collect_episode は一様サンプルの枝だけを通る。
+    actor = None if random else agent
+    if n_episodes == 0:
+        remaining = n_steps
+        while remaining > 0:
+            key, k_ep = jax.random.split(key)
+            ep, ret, key = collect_episode(
+                env, actor, config, k_ep, random=random, max_steps=remaining
+            )
+            taken = len(ep["rew"])
+            if taken <= 0:
+                raise RuntimeError("ステップを1つも集められませんでした。")
+            chunks.append(ep)
+            returns.append(ret)
+            remaining -= taken
+    else:
+        for _ in range(n_episodes):
+            key, k_ep = jax.random.split(key)
+            ep, ret, key = collect_episode(
+                env, actor, config, k_ep, random=random
+            )
+            chunks.append(ep)
+            returns.append(ret)
+    return chunks, returns, key
+
+
+def collect_random(
+    env: Env,
+    config: Config,
+    key: jax.Array,
+) -> tuple[list[dict[str, Any]], list[float], jax.Array]:
+    """ランダム行動のデータを集め、チャンクのリストと各チャンクの合計報酬を返す。
+
+    random_episodes が 1 以上のときは、その本数だけエピソードが終わるまで集める。
+    0 のときは random_steps ステップ集める。done が先に来たチャンクはそこで区切り、
+    残りの歩数は新しいエピソードとして続ける。各チャンクは reset から始まる。
+    """
+    return collect_chunks(
+        env,
+        None,
+        config,
+        key,
+        episodes=config.random_episodes,
+        steps=config.random_steps,
+        random=True,
+        episodes_name="random_episodes",
+        steps_name="random_steps",
+    )
 
 
 def batch_to_jax(batch: dict[str, Any]) -> dict[str, Any]:
@@ -173,153 +358,274 @@ def extract_start_states(agent: Agent, batch: dict[str, Any], key: jax.Array):
     return jax.tree.map(jax.lax.stop_gradient, start)
 
 
-def train(config: Config | None = None, discrete: bool = True) -> Agent:
-    """第一段の閉じたループを一度走らせ、学習済みエージェントを返す。
+def update_world_model(
+    agent: Agent,
+    buffer: ReplayBuffer,
+    config: Config,
+    wm_step,
+    opt_state,
+    key: jax.Array,
+    rng: np.random.Generator,
+    n_updates: int,
+    done_updates: int = 0,
+) -> tuple[Agent, Any, jax.Array, dict[str, float]]:
+    """バッファのミニバッチで世界モデルを n_updates 回更新する。
 
-    discrete=True は行動が「負方向・停止・正方向」の3値。
-    False は同じ力学のまま、行動が速度そのもの（連続値）になる。
+    呼び方は環境に依らない。最適化器の状態は呼び出し側が持ち、周をまたいで渡す。
+    done_updates は、この呼び出しより前に済ませた更新回数。ログの番号に使う。
+    """
+    # wm_step は world_model_loss（再構成 + 報酬の対数尤度 + 事前と事後の KL）の
+    # 勾配でエージェントを1回更新する。Adam のモーメントは opt_state に別に持つ。
+    last_metrics: dict[str, float] = {}
+    for epoch in range(n_updates):
+        # バッファ内のエピソードから長さ seq_len の区間を batch_size 本切り出す。
+        batch = buffer.sample_paths(config.batch_size, config.seq_len, rng)
+        batch = batch_to_jax(batch)
+        key, k_step = jax.random.split(key)
+        agent, opt_state, loss, metrics = wm_step(
+            agent, opt_state, batch, k_step
+        )
+        last_metrics = {k: float(v) for k, v in metrics.items()}
+        # total = recon（観測の再構成）+ rew（報酬の予測）+ kl（事前と事後のずれ）
+        done = done_updates + epoch + 1
+        if done % 10 == 0 or done == 1:
+            print(
+                f"  update {done:03d} "
+                f"total={last_metrics['loss/total']:.4f} "
+                f"recon={last_metrics['loss/recon']:.4f} "
+                f"rew={last_metrics['loss/reward']:.4f} "
+                f"kl={last_metrics['loss/kl']:.4f}"
+            )
+    return agent, opt_state, key, last_metrics
+
+
+def update_policy(
+    agent: Agent,
+    buffer: ReplayBuffer,
+    config: Config,
+    pol_step,
+    opt_state,
+    key: jax.Array,
+    rng: np.random.Generator,
+    n_updates: int,
+    done_updates: int = 0,
+) -> tuple[Agent, Any, jax.Array, dict[str, float]]:
+    """バッファの事後状態を開始点にして、方策を n_updates 回更新する。
+
+    呼び方は環境に依らない。最適化器の状態は呼び出し側が持ち、周をまたいで渡す。
+    done_updates は、この呼び出しより前に済ませた更新回数。ログの番号に使う。
+    """
+    # pol_step は方策ネットだけを更新する。世界モデル側のパラメータには勾配を流さない。
+    # 学習中の efe は entropy（重い KL は使わない）。
+    last_metrics: dict[str, float] = {}
+    for epoch in range(n_updates):
+        batch = buffer.sample_paths(config.batch_size, config.seq_len, rng)
+        batch = batch_to_jax(batch)
+        key, k_state, k_step = jax.random.split(key, 3)
+        # 系列を世界モデルで通し、末尾の事後状態を想像の開始点にする。
+        starts = extract_start_states(agent, batch, k_state)
+        agent, opt_state, loss, metrics = pol_step(
+            agent, opt_state, starts, k_step
+        )
+        last_metrics = {k: float(v) for k, v in metrics.items()}
+        done = done_updates + epoch + 1
+        if done % 10 == 0 or done == 1:
+            print(
+                f"  update {done:03d} "
+                f"loss={last_metrics['policy/loss']:.4f} "
+                f"efe={last_metrics['policy/efe']:.4f}"
+            )
+    return agent, opt_state, key, last_metrics
+
+
+def _train_on_chunk(
+    agent: Agent,
+    buffer: ReplayBuffer,
+    config: Config,
+    taken: int,
+    credit: TrainRatio,
+    wm_step,
+    wm_opt_state,
+    pol_step,
+    pol_opt_state,
+    key: jax.Array,
+    rng: np.random.Generator,
+    done_updates: int,
+) -> tuple[Agent, Any, Any, jax.Array, int]:
+    """チャンクを入れたあと、train_ratio が指定する回数だけ更新する。
+
+    系列を切れるようになるまでは回数を進めない。そのステップは比に含めない。
+    方策モードでは、世界モデルの1回につき方策も1回更新する。
+    """
+    if not buffer.can_sample(config.seq_len):
+        return agent, wm_opt_state, pol_opt_state, key, done_updates
+    n_updates = credit.updates_for(taken)
+    if n_updates <= 0:
+        return agent, wm_opt_state, pol_opt_state, key, done_updates
+    # 1 回は世界モデルを1回、方策モードなら続けて方策を1回。DreamerV3 の train 1 回に対応する。
+    for i in range(n_updates):
+        agent, wm_opt_state, key, _ = update_world_model(
+            agent,
+            buffer,
+            config,
+            wm_step,
+            wm_opt_state,
+            key,
+            rng,
+            1,
+            done_updates + i,
+        )
+        if config.action_mode == "policy":
+            agent, pol_opt_state, key, _ = update_policy(
+                agent,
+                buffer,
+                config,
+                pol_step,
+                pol_opt_state,
+                key,
+                rng,
+                1,
+                done_updates + i,
+            )
+    return agent, wm_opt_state, pol_opt_state, key, done_updates + n_updates
+
+
+def train(env: Env, config: Config | None = None) -> Agent:
+    """環境と設定を受け取り、収集と更新を n_rounds 周繰り返す。
+
+    行動は select_action。random_initial が真のときだけ、1周目を一様サンプルにする。
+    チャンクをバッファに入れるたびに、train_ratio に従って世界モデルを更新する。
+    方策モードでは同じ回数だけ方策も更新し、次のチャンクの select_action に使う。
+
+    1周目の量は random_episodes / random_steps、
+    2周目以降の量は collect_episodes / collect_steps。
+    環境ごとの次元や離散・連続の切り替えは、この関数には書かない。
     """
     config = config or Config()
-    # 第一段は小さめのネットで十分。
-    # これより下は、1次元環境向けに Config の既定値を上書きしている。
-    # deter は GRU が持つ記憶、stoch は各時刻サンプルする確率的な潜在の次元。
-    config.deter_dim = 64
-    config.stoch_dim = 16
-    config.hidden_dim = 64
-    config.vec_units = 32
-    config.vec_layers = 2
-    config.batch_size = 16
-    # 世界モデルが1回の更新で見る系列の長さ。エピソード長（max_steps=40）より短い。
-    config.seq_len = 20
-    # 行動選択で想像する未来の長さ。候補モードも方策モードもこの値を共有する。
-    config.horizon = 4
-    config.candidate_count = 81  # 3^4 = 81 で離散全列挙
-    config.random_episodes = 30
-    config.wm_epochs = 40
-    config.policy_epochs = 30
-    # 情報利得は、想像した stoch の事前エントロピー。観測をデコードし直す KL は使わない。
-    config.efe_mode = "entropy"
-    # 実用項（予測報酬の符号反転）を主にし、情報利得の寄与は小さくしておく。
-    config.epistemic_weight = 0.01
-    config.action_mode = "candidate"
+    _validate_train_config(config)
 
-    # 数直線上の位置を速度で動かす環境。1ステップの移動は max_speed までなので、
-    # 目標へは複数ステップかかる。エピソードは 40 ステップで打ち切る。
-    env = Point1DEnv(discrete=discrete, max_speed=0.1, max_steps=40, seed=config.seed)
     # JAX の乱数はキーを split して配る。同じキーを二つの用途に使い回さない。
     key = jax.random.PRNGKey(config.seed)
     key, k_agent = jax.random.split(key)
     # 入出力の次元は環境が宣言する obs_space / act_space から決まる。
     agent = Agent.create(env.obs_space, env.act_space, config, k_agent)
 
-    # --- 1. ランダム収集 ---------------------------------------------------
-    # 世界モデルは、自分が選んだ行動ではなく、一様な行動の軌道から先に学ぶ。
-    buffer = ReplayBuffer(capacity=500)
-    print(f"Collecting {config.random_episodes} random episodes...")
-    returns = []
-    for i in range(config.random_episodes):
-        key, k_ep = jax.random.split(key)
-        # agent に None を渡すと、collect_episode はランダム行動の枝だけを通る。
-        ep, ret, key = collect_episode(env, None, config, k_ep, random=True)
-        buffer.add_episode(ep)
-        returns.append(ret)
-    print(f"  mean return: {np.mean(returns):.3f}")
-
-    # --- 2. 世界モデルの学習 -----------------------------------------------
-    # wm_step は world_model_loss（再構成 + 報酬の対数尤度 + 事前と事後の KL）の
-    # 勾配でエージェントを1回更新する。Adam のモーメントは wm_opt_state に別に持つ。
-    wm_opt, wm_step = make_wm_step(config)
+    buffer = ReplayBuffer(capacity=config.buffer_capacity)
     # Equinox のモジュールには配列でない設定値も入っている。勾配の対象は配列だけ。
-    wm_opt_state = wm_opt.init(eqx.filter(agent, eqx.is_inexact_array))
+    params = eqx.filter(agent, eqx.is_inexact_array)
+    wm_opt, wm_step = make_wm_step(config)
+    wm_opt_state = wm_opt.init(params)
+    pol_step = None
+    pol_opt_state = None
+    if config.action_mode == "policy":
+        pol_opt, pol_step = make_policy_step(config)
+        pol_opt_state = pol_opt.init(params)
     # ミニバッチを切り出す乱数は numpy。上の JAX キーとは別系統。
     rng = np.random.default_rng(config.seed)
+    credit = TrainRatio(config.train_ratio, config.batch_size * config.seq_len)
+    done_updates = 0
 
-    print(f"Training world model for {config.wm_epochs} epochs...")
-    last_metrics = {}
-    for epoch in range(config.wm_epochs):
-        # バッファ内のエピソードから長さ seq_len の区間を batch_size 本切り出す。
-        batch = buffer.sample_paths(config.batch_size, config.seq_len, rng)
-        batch = batch_to_jax(batch)
-        key, k_step = jax.random.split(key)
-        agent, wm_opt_state, loss, metrics = wm_step(
-            agent, wm_opt_state, batch, k_step
+    for round_i in range(config.n_rounds):
+        # 1周目と2周目以降で、集める本数（またはステップ数）を別に取る。
+        # 一様サンプルにするのは、オプションを立てた1周目だけ。
+        if round_i == 0:
+            episodes = config.random_episodes
+            steps = config.random_steps
+            episodes_name = "random_episodes"
+            steps_name = "random_steps"
+            random = bool(config.random_initial)
+        else:
+            episodes = config.collect_episodes
+            steps = config.collect_steps
+            episodes_name = "collect_episodes"
+            steps_name = "collect_steps"
+            random = False
+        if random:
+            how = "ランダムに"
+        elif config.action_mode == "policy":
+            how = "方策で"
+        else:
+            how = "候補で"
+        n_episodes, n_steps = _require_collection(
+            episodes, steps, episodes_name, steps_name
         )
-        last_metrics = {k: float(v) for k, v in metrics.items()}
-        # total = recon（観測の再構成）+ rew（報酬の予測）+ kl（事前と事後のずれ）
-        if (epoch + 1) % 10 == 0 or epoch == 0:
-            print(
-                f"  epoch {epoch+1:03d} "
-                f"total={last_metrics['loss/total']:.4f} "
-                f"recon={last_metrics['loss/recon']:.4f} "
-                f"rew={last_metrics['loss/reward']:.4f} "
-                f"kl={last_metrics['loss/kl']:.4f}"
-            )
+        if n_episodes == 0:
+            amount = f"{n_steps} ステップ"
+        else:
+            amount = f"{n_episodes} エピソード"
+        print(f"周回 {round_i + 1}/{config.n_rounds}: {how} {amount}集めます...")
 
-    # 候補モード評価
-    # 方策ネットは使わない。horizon 手先までの行動列を作り、期待自由エネルギーの
-    # 和が最小の列の先頭1手だけを環境で実行する。離散行動のときは 3^4 = 81 本を
-    # 全列挙し、連続行動のときは行動範囲から 81 本をサンプルする。
-    # ここで集めた軌道もバッファへ足し、次の方策学習の材料にする。
-    print("Evaluating candidate planner...")
-    config.action_mode = "candidate"
-    cand_returns = []
-    for i in range(10):
-        key, k_ep = jax.random.split(key)
-        ep, ret, key = collect_episode(env, agent, config, k_ep, random=False)
-        cand_returns.append(ret)
-        buffer.add_episode(ep)
-    print(f"  candidate mean return: {np.mean(cand_returns):.3f}")
+        returns: list[float] = []
+        # collect_chunks と同じ区切り。学習をチャンクのあいだに挟むため、ここでは1本ずつ進める。
+        if n_episodes == 0:
+            remaining = n_steps
+            while remaining > 0:
+                key, k_ep = jax.random.split(key)
+                actor = None if random else agent
+                ep, ret, key = collect_episode(
+                    env, actor, config, k_ep, random=random, max_steps=remaining
+                )
+                taken = len(ep["rew"])
+                if taken <= 0:
+                    raise RuntimeError("ステップを1つも集められませんでした。")
+                buffer.add_episode(ep)
+                returns.append(ret)
+                agent, wm_opt_state, pol_opt_state, key, done_updates = _train_on_chunk(
+                    agent,
+                    buffer,
+                    config,
+                    taken,
+                    credit,
+                    wm_step,
+                    wm_opt_state,
+                    pol_step,
+                    pol_opt_state,
+                    key,
+                    rng,
+                    done_updates,
+                )
+                remaining -= taken
+        else:
+            for _ in range(n_episodes):
+                key, k_ep = jax.random.split(key)
+                actor = None if random else agent
+                ep, ret, key = collect_episode(
+                    env, actor, config, k_ep, random=random
+                )
+                taken = len(ep["rew"])
+                if taken <= 0:
+                    raise RuntimeError("ステップを1つも集められませんでした。")
+                buffer.add_episode(ep)
+                returns.append(ret)
+                agent, wm_opt_state, pol_opt_state, key, done_updates = _train_on_chunk(
+                    agent,
+                    buffer,
+                    config,
+                    taken,
+                    credit,
+                    wm_step,
+                    wm_opt_state,
+                    pol_step,
+                    pol_opt_state,
+                    key,
+                    rng,
+                    done_updates,
+                )
+        print(f"  mean return: {float(np.mean(returns)):.3f}")
+        print(f"  累計の更新: {done_updates} 回")
 
-    # 方策モード学習
-    print(f"Training policy for {config.policy_epochs} epochs...")
-    config.action_mode = "policy"
-    # 学習中の efe は entropy（重い KL は使わない）
-    config.efe_mode = "entropy"
-    # pol_step は方策ネットだけを更新する。世界モデル側のパラメータには勾配を流さない。
-    pol_opt, pol_step = make_policy_step(config)
-    pol_opt_state = pol_opt.init(eqx.filter(agent, eqx.is_inexact_array))
-    for epoch in range(config.policy_epochs):
-        batch = buffer.sample_paths(config.batch_size, config.seq_len, rng)
-        batch = batch_to_jax(batch)
-        key, k_state, k_step = jax.random.split(key, 3)
-        # 系列を世界モデルで通し、末尾の事後状態を想像の開始点にする。
-        starts = extract_start_states(agent, batch, k_state)
-        agent, pol_opt_state, loss, metrics = pol_step(
-            agent, pol_opt_state, starts, k_step
+    if config.train_ratio > 0 and not buffer.can_sample(config.seq_len):
+        raise RuntimeError(
+            f"長さ {config.seq_len} 以上のチャンクが無く、学習できません。"
         )
-        if (epoch + 1) % 10 == 0 or epoch == 0:
-            print(
-                f"  epoch {epoch+1:03d} "
-                f"loss={float(metrics['policy/loss']):.4f} "
-                f"efe={float(metrics['policy/efe']):.4f}"
-            )
-
-    # 方策モード評価。collect_episode は候補モードと同じ関数で、
-    # action_mode が "policy" なので select_action が方策ネットから行動を引く。
-    print("Evaluating policy mode...")
-    config.action_mode = "policy"
-    pol_returns = []
-    for i in range(10):
-        key, k_ep = jax.random.split(key)
-        ep, ret, key = collect_episode(env, agent, config, k_ep, random=False)
-        pol_returns.append(ret)
-    print(f"  policy mean return: {np.mean(pol_returns):.3f}")
-    print(f"  random mean return: {np.mean(returns):.3f}")
     return agent
 
 
-def main():
-    """コマンドラインから train を起動する。
+def main() -> None:
+    """Point1D の実験を起動する。数値と離散・連続の切り替えは experiments/point1d.py にある。"""
+    from active_inference.experiments.point1d import main as run_point1d
 
-    既定は離散の3値行動。--continuous を付けると、行動が速度の連続値になる。
-    どちらの場合も train() の5段階は同じ順序で走る。
-    """
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--continuous", action="store_true")
-    parser.add_argument("--seed", type=int, default=0)
-    args = parser.parse_args()
-    config = Config(seed=args.seed)
-    train(config, discrete=not args.continuous)
+    run_point1d()
 
 
 if __name__ == "__main__":

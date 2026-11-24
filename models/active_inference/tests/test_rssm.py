@@ -36,6 +36,9 @@ def test_observe_imagine_scan():
     assert outs["deter"].shape == (T, 16)
     assert outs["stoch"].shape == (T, 4)
     assert outs["kl"].shape == (T,)
+    # 勾配を止めても順伝播の KL は同じ値になる。
+    assert jnp.allclose(outs["kl_dyn"], outs["kl"])
+    assert jnp.allclose(outs["kl_rep"], outs["kl"])
     final2, outs2 = rssm.imagine(rssm.initial(), actions, k2)
     assert outs2["deter"].shape == (T, 16)
     assert outs2["prior_entropy"].shape == (T,)
@@ -59,6 +62,14 @@ def test_categorical_stoch():
     prior_state, dist = rssm.prior(state, jnp.zeros((2,)), k1)
     assert prior_state["stoch"].shape == (3, 5)
     assert dist.entropy().shape == ()
+    T = 3
+    actions = jnp.zeros((T, 2), dtype=jnp.float32)
+    embeds = jnp.zeros((T, 4), dtype=jnp.float32)
+    resets = jnp.zeros((T,), dtype=bool).at[0].set(True)
+    _, outs = rssm.observe(state, actions, embeds, resets, k1)
+    assert outs["kl_dyn"].shape == (T,)
+    assert jnp.allclose(outs["kl_dyn"], outs["kl"])
+    assert jnp.allclose(outs["kl_rep"], outs["kl"])
 
 
 if __name__ == "__main__":
