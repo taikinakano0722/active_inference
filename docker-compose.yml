@@ -14,6 +14,8 @@ services:
               capabilities: [gpu]
     volumes:
       - .:/workspace
+      # cueworld と subtasks_for_cueworld の環境。active_inference/envs/cueworld_subtasks.py が読む。
+      - ../cueworld:/cueworld:ro
     working_dir: /workspace
     environment:
       PYTHONPATH: "/workspace/models/dreamerv3:/workspace/models"

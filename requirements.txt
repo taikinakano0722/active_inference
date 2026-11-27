@@ -39,3 +39,6 @@ dm_control
 equinox==0.11.10
 distrax==0.1.5
 tensorflow-probability==0.24.0
+
+# ../cueworld/subtasks_for_cueworld の環境（Gymnasium の契約）。cueworld 側と同じ版。
+gymnasium==1.2.1
