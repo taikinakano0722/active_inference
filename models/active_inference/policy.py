@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import itertools
 from typing import Any
 
 import equinox as eqx
@@ -125,16 +124,14 @@ def sample_action_sequences(
         n = int(space.n)
         total = n ** horizon
         if total <= n_candidates:
-            # 全列挙
-            seqs = []
-            for prod in itertools.product(range(n), repeat=horizon):
-                onehots = []
-                for a in prod:
-                    v = np.zeros((n,), dtype=np.float32)
-                    v[a] = 1.0
-                    onehots.append(v)
-                seqs.append(np.stack(onehots, axis=0))
-            return jnp.asarray(np.stack(seqs, axis=0))
+            # 全列挙。最後の時刻が一番速く変わる。JIT の中でも同じ列になる。
+            idx = jnp.arange(total)
+            digits = []
+            for t in range(horizon):
+                power = n ** (horizon - 1 - t)
+                digits.append((idx // power) % n)
+            indices = jnp.stack(digits, axis=1)
+            return jax.nn.one_hot(indices, n, dtype=jnp.float32)
         # ランダム one-hot
         idx = jax.random.randint(key, (n_candidates, horizon), 0, n)
         return jax.nn.one_hot(idx, n, dtype=jnp.float32)
@@ -196,7 +193,6 @@ class CandidatePlanner:
             config.candidate_count,
             k_samp,
         )
-        # numpy 全列挙の結果を JAX に載せた場合もある。
         action_seqs = jnp.asarray(action_seqs, dtype=jnp.float32)
         first_action, best_efe, mean_efe = _plan_with_seqs(
             rssm,

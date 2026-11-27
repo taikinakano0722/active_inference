@@ -5,7 +5,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from active_inference.agent import Agent
+from active_inference.agent import Agent, policy_loss
 from active_inference.config import Config
 from active_inference.envs.point1d import Point1DEnv
 from active_inference.train import TrainRatio, train
@@ -170,6 +170,50 @@ def test_initial_policy_is_broad():
     assert std > 0.5
 
 
+def test_policy_loss_rejects_kl_efe_mode():
+    env = Point1DEnv(discrete=True, max_steps=4, seed=0)
+    cfg = _tiny(efe_mode="kl", n_rounds=1, random_episodes=1)
+    key = jax.random.PRNGKey(0)
+    agent = Agent.create(env.obs_space, env.act_space, cfg, key)
+    starts = {
+        "deter": jnp.zeros((2, cfg.deter_dim)),
+        "stoch": jnp.zeros((2, cfg.stoch_dim)),
+    }
+    try:
+        policy_loss(agent, starts, cfg, key)
+    except ValueError as exc:
+        assert "entropy" in str(exc)
+    else:
+        raise AssertionError("policy_loss は efe_mode が kl のときエラーになるべき")
+
+
+def test_unknown_replay_mode_raises():
+    env = Point1DEnv(discrete=True, max_steps=4, seed=0)
+    try:
+        train(env, _tiny(n_rounds=1, random_episodes=1, replay_mode="chunk"))
+    except ValueError as exc:
+        assert "replay_mode" in str(exc)
+    else:
+        raise AssertionError("replay_mode が episode でも stream でもないときはエラーになるべき")
+
+
+def test_train_stream_replay_runs():
+    env = Point1DEnv(discrete=True, max_steps=6, seed=0)
+    # 1本は 6 歩。batch_size * seq_len = 16 なので、比 16 なら更新が 1 回入る。
+    agent = train(
+        env,
+        _tiny(
+            n_rounds=1,
+            random_episodes=1,
+            random_initial=True,
+            replay_mode="stream",
+            stream_capacity=1000,
+            train_ratio=16.0,
+        ),
+    )
+    assert isinstance(agent, Agent)
+
+
 def test_policy_mode_requires_entropy_efe():
     env = Point1DEnv(discrete=True, max_steps=5, seed=0)
     cfg = Config(
@@ -191,6 +235,9 @@ if __name__ == "__main__":
     test_initial_policy_is_broad()
     test_missing_collect_budget_raises_before_training()
     test_n_rounds_must_be_positive()
+    test_policy_loss_rejects_kl_efe_mode()
+    test_unknown_replay_mode_raises()
+    test_train_stream_replay_runs()
     test_policy_mode_requires_entropy_efe()
     test_train_second_round_uses_its_own_budget_and_the_model()
     test_train_without_random_initial_uses_select_action()

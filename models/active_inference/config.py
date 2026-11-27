@@ -48,6 +48,7 @@ class Config:
     dyn_scale: float = 1.0
     rep_scale: float = 0.1
     kl_scale: float = 1.0
+    # ※ 現在は EFE の和に掛かっていない。将来割引を入れるときの予約。
     gamma: float = 0.99
 
     # 環境ループ
@@ -65,12 +66,17 @@ class Config:
     collect_steps: int = 0
     # 収集と更新を繰り返す周回数。更新そのものは各チャンクのあと、train_ratio に従って行う。
     n_rounds: int = 1
+    # replay_mode が "episode" のとき、残す記録の本数。1本は環境をやり直してから終わるまでの系列。
     buffer_capacity: int = 1000
+    # "episode": 1本ずつ保存し、満杯なら古い1本を捨てる。1本の途中に終わりはない。
+    # "stream": ステップを1本の列につなぎ、stream_capacity を超えたら古いステップから捨てる。
+    replay_mode: str = "episode"
+    # replay_mode が "stream" のとき、列に残すステップ数の上限。
+    stream_capacity: int = 100_000
     # 新しい環境ステップ 1 に対し、リプレイから何ステップ分を学習に使うか。
     # 更新 1 回が使う量は batch_size * seq_len。端数は次のチャンクへ持ち越す。
     # 系列を切れるようになる前のステップは、この比に含めない。
     train_ratio: float = 32.0
-    train_steps: int = 200
     seed: int = 0
 
     # 追加の任意キー

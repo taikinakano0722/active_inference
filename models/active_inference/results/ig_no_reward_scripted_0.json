@@ -1,0 +1,61 @@
+{
+  "mode": "no_reward",
+  "data_source": "scripted",
+  "seed": 0,
+  "coverage_episodes": 121,
+  "scripted_episodes": 60,
+  "train_updates": 203,
+  "collect_epistemic_weight": null,
+  "sweep": [
+    {
+      "n_episodes": 20,
+      "count_K": 3,
+      "count_C": 6,
+      "count_neither": 11,
+      "rate_K": 0.15,
+      "rate_C": 0.3,
+      "rate_neither": 0.55,
+      "epistemic_weight": 0.0
+    },
+    {
+      "n_episodes": 20,
+      "count_K": 0,
+      "count_C": 18,
+      "count_neither": 2,
+      "rate_K": 0.0,
+      "rate_C": 0.9,
+      "rate_neither": 0.1,
+      "epistemic_weight": 0.1
+    },
+    {
+      "n_episodes": 20,
+      "count_K": 0,
+      "count_C": 20,
+      "count_neither": 0,
+      "rate_K": 0.0,
+      "rate_C": 1.0,
+      "rate_neither": 0.0,
+      "epistemic_weight": 0.5
+    },
+    {
+      "n_episodes": 20,
+      "count_K": 0,
+      "count_C": 18,
+      "count_neither": 2,
+      "rate_K": 0.0,
+      "rate_C": 0.9,
+      "rate_neither": 0.1,
+      "epistemic_weight": 1.0
+    },
+    {
+      "n_episodes": 20,
+      "count_K": 0,
+      "count_C": 20,
+      "count_neither": 0,
+      "rate_K": 0.0,
+      "rate_C": 1.0,
+      "rate_neither": 0.0,
+      "epistemic_weight": 2.0
+    }
+  ]
+}

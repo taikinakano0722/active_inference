@@ -2,7 +2,7 @@
 
 JAX（Equinox + Optax + Distrax）でスクラッチ実装した RSSM ベースの深層能動的推論。
 
-進め方は [進め方.md](進め方.md) を参照。
+進め方は [進め方.md](進め方.md) を参照。cueworld の subtasks を別のマシンで始める手順は [SETUP_cueworld.md](SETUP_cueworld.md)、回し方は [README_cueworld.md](README_cueworld.md)。
 
 ## アーキテクチャ
 
