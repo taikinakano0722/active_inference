@@ -467,7 +467,11 @@ def _train_on_chunk(
     return agent, wm_opt_state, pol_opt_state, key, done_updates + n_updates
 
 
-def train(env: Env, config: Config | None = None) -> Agent:
+def train(
+    env: Env,
+    config: Config | None = None,
+    agent: Agent | None = None,
+) -> Agent:
     """環境と設定を受け取り、収集と更新を n_rounds 周繰り返す。
 
     行動は step_latent_and_action。中身は select_action と同じ2モードで、
@@ -475,6 +479,9 @@ def train(env: Env, config: Config | None = None) -> Agent:
     チャンクをバッファに入れるたびに、train_ratio に従って更新する。
     方策モードでは、同じバッチ・1回の observe で世界モデルと方策を更新し、
     次のチャンクの行動選択に使う。
+
+    agent を渡したときは Agent.create をせず、その重みから学習を続ける。
+    オプティマイザ状態は毎回作り直す（途中の momentum は捨てる）。
 
     1周目の量は random_episodes / random_steps、
     2周目以降の量は collect_episodes / collect_steps。
@@ -487,7 +494,9 @@ def train(env: Env, config: Config | None = None) -> Agent:
     key = jax.random.PRNGKey(config.seed)
     key, k_agent = jax.random.split(key)
     # 入出力の次元は環境が宣言する obs_space / act_space から決まる。
-    agent = Agent.create(env.obs_space, env.act_space, config, k_agent)
+    # 評価用に段階を分けるときは、学習済みの agent を受け取り直す。
+    if agent is None:
+        agent = Agent.create(env.obs_space, env.act_space, config, k_agent)
 
     if config.replay_mode == "stream":
         buffer = StreamReplayBuffer(capacity=config.stream_capacity)

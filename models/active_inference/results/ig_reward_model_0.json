@@ -1,0 +1,41 @@
+{
+  "mode": "reward",
+  "data_source": "model",
+  "seed": 0,
+  "coverage_episodes": 41,
+  "model_episodes": 60,
+  "train_updates": 373,
+  "collect_epistemic_weight": 1.0,
+  "sweep": [
+    {
+      "n_episodes": 20,
+      "mean_cumulative_reward": 0.3,
+      "std_cumulative_reward": 0.714142842854285,
+      "epistemic_weight": 0.0
+    },
+    {
+      "n_episodes": 20,
+      "mean_cumulative_reward": 0.1,
+      "std_cumulative_reward": 0.6244997998398398,
+      "epistemic_weight": 0.1
+    },
+    {
+      "n_episodes": 20,
+      "mean_cumulative_reward": -0.05,
+      "std_cumulative_reward": 0.3122498999199199,
+      "epistemic_weight": 0.5
+    },
+    {
+      "n_episodes": 20,
+      "mean_cumulative_reward": 0.05,
+      "std_cumulative_reward": 0.35000000000000003,
+      "epistemic_weight": 1.0
+    },
+    {
+      "n_episodes": 20,
+      "mean_cumulative_reward": -0.075,
+      "std_cumulative_reward": 0.3269174207655506,
+      "epistemic_weight": 2.0
+    }
+  ]
+}
