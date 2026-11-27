@@ -126,27 +126,18 @@ def _batch_encode(encoder: Encoder, obs: dict[str, jnp.ndarray]) -> jnp.ndarray:
     """obs 各値は (B, T, ...)。返り値 (B, T, embed)。
 
     Encoder は観測1件用なので、バッチ B と時刻 T の両方に vmap を掛ける。
-    実際に使っているのは at_t。時刻 t の観測を全バッチ分エンコードし、
-    時刻方向に並べたあと (T, B, E) を (B, T, E) に転置して返す。
+    時刻を先頭に移してから、外側を時間、内側をバッチにしてエンコードし、
+    (B, T, E) に戻す。
     """
+    # obs_t: 各キー (T, B, ...)
+    obs_t = {k: jnp.swapaxes(v, 0, 1) for k, v in obs.items()}
 
-    def encode_bt(t_obs):
-        return jax.vmap(encoder)(t_obs)
+    def encode_time(obs_b):
+        # obs_b: 各キー (B, ...)
+        return jax.vmap(encoder)(obs_b)
 
-    # 時間方向に vmap するため、キーごとに (B, T, ...) → 辞書のまま時間 vmap
-    def encode_one_time(obs_t):
-        return jax.vmap(encoder)(obs_t)
-
-    # obs_t: 各キー (B, ...)
-    # まず (T, B, ...) に転置して scan/vmap
-    keys = list(obs.keys())
-    T = obs[keys[0]].shape[1]
-
-    def at_t(t):
-        obs_t = {k: obs[k][:, t] for k in keys}
-        return jax.vmap(encoder)(obs_t)
-
-    return jax.vmap(at_t)(jnp.arange(T)).transpose(1, 0, 2)  # (B, T, E)
+    encoded = jax.vmap(encode_time)(obs_t)  # (T, B, E)
+    return jnp.swapaxes(encoded, 0, 1)
 
 
 def _actions_to_array(
@@ -185,7 +176,6 @@ def _world_model_forward(
     outs の末尾は、方策学習の想像の開始状態に使える。
     """
     B = rew.shape[0]
-    T = rew.shape[1]
     # 行動後の観測は obs[:, 1:]
     # 先頭の obs[:, 0] は行動前の観測なので、再構成の対象にはしない。
     obs_post = {k: v[:, 1:] for k, v in obs.items()}
@@ -224,19 +214,14 @@ def _world_model_forward(
         rew_lp = -agent.reward_decoder(feat).log_prob(rew_t)
         return recon, rew_lp
 
-    def decode_path(deter_seq, stoch_seq, obs_seq, rew_seq):
-        # (T, ...)
-        def body(t):
-            obs_t = {k: obs_seq[k][t] for k in obs_seq}
-            return decode_loss_t(deter_seq[t], stoch_seq[t], obs_t, rew_seq[t])
-
-        recons, rews = jax.vmap(body)(jnp.arange(T))
-        return recons, rews
+    def decode_batch(deter_seq, stoch_seq, obs_seq, rew_seq):
+        # 各配列は (T, ...)。vmap が時間を1時刻ずつ decode_loss_t に渡す。
+        return jax.vmap(decode_loss_t)(deter_seq, stoch_seq, obs_seq, rew_seq)
 
     # outs deter/stoch: (B, T, ...)
     # obs_post: (B, T, ...)
     # 内側の vmap が時間、外側の vmap がバッチ。
-    recon_losses, rew_losses = jax.vmap(decode_path)(
+    recon_losses, rew_losses = jax.vmap(decode_batch)(
         outs["deter"],
         outs["stoch"],
         obs_post,
@@ -324,9 +309,15 @@ def policy_loss(
       3. 進んだ状態の予測報酬と事前エントロピーから、その時刻の EFE を出す。
     損失に入れるのは、この EFE をホライズン分足した値。
 
-    ここは常に epistemic_kl=None で EFE を計算する。config.efe_mode は
-    "entropy" である必要がある。想像中に KL を毎回入れると重いため、kl は候補モード向け。
+    ここは常に epistemic_kl=None で EFE を計算する。efe_mode が "kl" のときは
+    ここで止める。想像中に KL を毎回入れると重いため、kl は候補モード向け。
     """
+    if config.efe_mode == "kl":
+        raise ValueError(
+            "policy_loss は想像の各歩で KL を計算しないため、"
+            "efe_mode は 'entropy' にしてください。"
+            "kl は候補モードの行動選択で使います。"
+        )
     B = start_states["deter"].shape[0]
     keys = jax.random.split(key, B)
 
@@ -350,8 +341,6 @@ def policy_loss(
             )
             return (st2, key), (efe, logp, ent)
 
-        # policy モードでは efe_mode を一時的に entropy として扱う
-        # （想像中に KL を毎回入れると重いため。kl は候補モード向け）
         # scan の入力系列は無い。length=horizon の回数だけ step を回す。
         (_, _), (efes, logps, ents) = jax.lax.scan(
             step, (state, k_roll), None, length=config.horizon

@@ -42,7 +42,6 @@ def _kl_from_imagined_obs(
     obs_decoder: ObsDecoder,
     state: dict[str, jnp.ndarray],
     prior_stats: jnp.ndarray,
-    key: jax.Array,
 ) -> jnp.ndarray:
     """想像した観測の平均をエンコードし直し、事後と事前の KL を取る。"""
     feat = rssm.feature(state)
@@ -98,7 +97,6 @@ def evaluate_action_sequence(
                 obs_decoder,
                 state,
                 rssm._dist_stats(prior_dist),
-                k_use,
             )
         else:
             kl = None

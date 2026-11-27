@@ -166,7 +166,8 @@ class RSSM(eqx.Module):
         )
         stats = self.posterior_net(x)
         post_dist = self._stats_to_dist(stats)
-        # 事後サンプル用に別キーが欲しいが、単一 key しか無いときは split。
+        # prior は deter の更新だけで、乱数キーは使わない。
+        # 事後のサンプル用キーは、渡されたキーから fold_in で分ける。
         key2 = jax.random.fold_in(key, 1)
         stoch = self._sample(post_dist, key2)
         post_state = {"deter": deter, "stoch": stoch}
@@ -198,11 +199,13 @@ class RSSM(eqx.Module):
         """時系列 observe。actions/obs_embeds/resets は時間軸が先頭 (T, ...)。"""
         # bound method を scan に渡すと Equinox+JAX で unhashable になるため、
         # ネスト関数から self を閉じ込める。
+        # 初期状態はゼロで、各歩で作り直しても値は同じ。scan の外で1回作る。
+        zero_state = self.initial()
+
         def step(carry, inputs):
             state, key = carry
             action, obs_embed, reset = inputs
             key, k_use = jax.random.split(key)
-            zero_state = self.initial()
             state = jax.tree.map(
                 lambda s, z: jnp.where(reset, z, s), state, zero_state
             )

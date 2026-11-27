@@ -37,7 +37,7 @@ from active_inference.agent import (
     step_latent_and_action,
 )
 from active_inference.config import Config
-from active_inference.replay_buffer import ReplayBuffer
+from active_inference.replay_buffer import ReplayBuffer, StreamReplayBuffer
 from active_inference.spaces import Space, action_dim, flatten_action
 
 
@@ -123,6 +123,13 @@ def _validate_train_config(config: Config) -> None:
             "action_mode は 'policy' か 'candidate' にしてください。"
             f" 受け取った値: {config.action_mode}"
         )
+    if config.replay_mode not in ("episode", "stream"):
+        raise ValueError(
+            "replay_mode は 'episode' か 'stream' にしてください。"
+            f" 受け取った値: {config.replay_mode}"
+        )
+    if config.replay_mode == "stream" and config.stream_capacity < 1:
+        raise ValueError("stream_capacity は 1 以上にしてください。")
     # 方策の損失は想像中に KL を渡さない。efe_mode が kl だとそこで落ちる。
     if config.action_mode == "policy" and config.efe_mode != "entropy":
         raise ValueError(
@@ -376,94 +383,31 @@ def extract_start_states(agent: Agent, batch: dict[str, Any], key: jax.Array):
     return jax.tree.map(jax.lax.stop_gradient, start)
 
 
-def update_world_model(
-    agent: Agent,
-    buffer: ReplayBuffer,
-    config: Config,
-    wm_step,
-    opt_state,
-    key: jax.Array,
-    rng: np.random.Generator,
-    n_updates: int,
-    done_updates: int = 0,
-) -> tuple[Agent, Any, jax.Array, dict[str, float]]:
-    """バッファのミニバッチで世界モデルを n_updates 回更新する。
+def _store_episode(buffer, episode: dict[str, Any], replay_mode: str) -> None:
+    """集めた1本をバッファに入れる。stream では1ステップずつ列へ足す。
 
-    呼び方は環境に依らない。最適化器の状態は呼び出し側が持ち、周をまたいで渡す。
-    done_updates は、この呼び出しより前に済ませた更新回数。ログの番号に使う。
+    collect_episode は毎回、環境をやり直した観測から始まる。
+    そのため列に足すとき、その1本の最初のステップだけ is_first を真にする。
     """
-    # wm_step は world_model_loss（再構成 + 報酬の対数尤度 + 事前と事後の KL）の
-    # 勾配でエージェントを1回更新する。Adam のモーメントは opt_state に別に持つ。
-    last_metrics: dict[str, float] = {}
-    for epoch in range(n_updates):
-        # バッファ内のエピソードから長さ seq_len の区間を batch_size 本切り出す。
-        batch = buffer.sample_paths(config.batch_size, config.seq_len, rng)
-        batch = batch_to_jax(batch)
-        key, k_step = jax.random.split(key)
-        agent, opt_state, loss, metrics = wm_step(
-            agent, opt_state, batch, k_step
+    if replay_mode != "stream":
+        buffer.add_episode(episode)
+        return
+    obs_keys = list(episode["obs"])
+    act_keys = list(episode["act"])
+    for t, (rew, done) in enumerate(zip(episode["rew"], episode["done"])):
+        buffer.add_step(
+            {k: episode["obs"][k][t] for k in obs_keys},
+            {k: episode["act"][k][t] for k in act_keys},
+            rew,
+            done,
+            t == 0,
+            {k: episode["obs"][k][t + 1] for k in obs_keys},
         )
-        # float はデバイスの完了を待つ。ログを出す回だけホストへ戻す。
-        done = done_updates + epoch + 1
-        if _should_log_update(done):
-            last_metrics = {k: float(v) for k, v in metrics.items()}
-            # total = recon（観測の再構成）+ rew（報酬の予測）+ kl（事前と事後のずれ）
-            print(
-                f"  update {done:03d} "
-                f"total={last_metrics['loss/total']:.4f} "
-                f"recon={last_metrics['loss/recon']:.4f} "
-                f"rew={last_metrics['loss/reward']:.4f} "
-                f"kl={last_metrics['loss/kl']:.4f}"
-            )
-        elif epoch == n_updates - 1:
-            last_metrics = {k: float(v) for k, v in metrics.items()}
-    return agent, opt_state, key, last_metrics
-
-
-def update_policy(
-    agent: Agent,
-    buffer: ReplayBuffer,
-    config: Config,
-    pol_step,
-    opt_state,
-    key: jax.Array,
-    rng: np.random.Generator,
-    n_updates: int,
-    done_updates: int = 0,
-) -> tuple[Agent, Any, jax.Array, dict[str, float]]:
-    """バッファの事後状態を開始点にして、方策を n_updates 回更新する。
-
-    呼び方は環境に依らない。最適化器の状態は呼び出し側が持ち、周をまたいで渡す。
-    done_updates は、この呼び出しより前に済ませた更新回数。ログの番号に使う。
-    """
-    # pol_step は方策ネットだけを更新する。世界モデル側のパラメータには勾配を流さない。
-    # 学習中の efe は entropy（重い KL は使わない）。
-    last_metrics: dict[str, float] = {}
-    for epoch in range(n_updates):
-        batch = buffer.sample_paths(config.batch_size, config.seq_len, rng)
-        batch = batch_to_jax(batch)
-        key, k_state, k_step = jax.random.split(key, 3)
-        # 系列を世界モデルで通し、末尾の事後状態を想像の開始点にする。
-        starts = extract_start_states(agent, batch, k_state)
-        agent, opt_state, loss, metrics = pol_step(
-            agent, opt_state, starts, k_step
-        )
-        done = done_updates + epoch + 1
-        if _should_log_update(done):
-            last_metrics = {k: float(v) for k, v in metrics.items()}
-            print(
-                f"  update {done:03d} "
-                f"loss={last_metrics['policy/loss']:.4f} "
-                f"efe={last_metrics['policy/efe']:.4f}"
-            )
-        elif epoch == n_updates - 1:
-            last_metrics = {k: float(v) for k, v in metrics.items()}
-    return agent, opt_state, key, last_metrics
 
 
 def _train_on_chunk(
     agent: Agent,
-    buffer: ReplayBuffer,
+    buffer: ReplayBuffer | StreamReplayBuffer,
     config: Config,
     taken: int,
     credit: TrainRatio,
@@ -545,7 +489,10 @@ def train(env: Env, config: Config | None = None) -> Agent:
     # 入出力の次元は環境が宣言する obs_space / act_space から決まる。
     agent = Agent.create(env.obs_space, env.act_space, config, k_agent)
 
-    buffer = ReplayBuffer(capacity=config.buffer_capacity)
+    if config.replay_mode == "stream":
+        buffer = StreamReplayBuffer(capacity=config.stream_capacity)
+    else:
+        buffer = ReplayBuffer(capacity=config.buffer_capacity)
     # Equinox のモジュールには配列でない設定値も入っている。勾配の対象は配列だけ。
     params = eqx.filter(agent, eqx.is_inexact_array)
     wm_step = None
@@ -608,7 +555,7 @@ def train(env: Env, config: Config | None = None) -> Agent:
                 taken = len(ep["rew"])
                 if taken <= 0:
                     raise RuntimeError("ステップを1つも集められませんでした。")
-                buffer.add_episode(ep)
+                _store_episode(buffer, ep, config.replay_mode)
                 returns.append(ret)
                 agent, wm_opt_state, pol_opt_state, key, done_updates = _train_on_chunk(
                     agent,
@@ -635,7 +582,7 @@ def train(env: Env, config: Config | None = None) -> Agent:
                 taken = len(ep["rew"])
                 if taken <= 0:
                     raise RuntimeError("ステップを1つも集められませんでした。")
-                buffer.add_episode(ep)
+                _store_episode(buffer, ep, config.replay_mode)
                 returns.append(ret)
                 agent, wm_opt_state, pol_opt_state, key, done_updates = _train_on_chunk(
                     agent,
